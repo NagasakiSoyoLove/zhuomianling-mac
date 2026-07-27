@@ -9,6 +9,7 @@ import type {
   PetLine,
   PetLineEvent
 } from "../../../shared/types/pet";
+import type { PresetVoiceOverview } from "../../../shared/types/presetVoice";
 import { AppleSelect, PanelSaveActions } from "./EditorShared";
 import { eventLabels } from "./editorNavigation";
 import {
@@ -106,6 +107,7 @@ export function EventLinesPanel({
   const [result, setResult] = useState<LocalPetSaveResult | undefined>();
   const [previewMessage, setPreviewMessage] = useState<string>();
   const [activePreviewEvent, setActivePreviewEvent] = useState<PetLineEvent>();
+  const [presetVoiceOverview, setPresetVoiceOverview] = useState<PresetVoiceOverview>();
   const activePreviewIdRef = useRef<number | undefined>();
   const expressionSources = pet.expressionSources ?? [];
   const faceSources = expressionSources.filter((source) => source.sourceKind === "expression");
@@ -125,6 +127,16 @@ export function EventLinesPanel({
     setPreviewMessage(undefined);
     onDirtyChange(false);
   }, [onDirtyChange, pet]);
+
+  useEffect(() => {
+    let active = true;
+    void window.desktopPet?.presetVoice.getOverview(pet.id).then((overview) => {
+      if (active) setPresetVoiceOverview(overview);
+    }).catch(() => {
+      if (active) setPresetVoiceOverview(undefined);
+    });
+    return () => { active = false; };
+  }, [pet.id, pet.lines, pet.voiceModelSettings]);
 
   useEffect(() => {
     return window.desktopPet?.petWindow.onSourcePreviewFinished(({ id }) => {
@@ -252,6 +264,10 @@ export function EventLinesPanel({
               const candidateLineCount = (eventDraft?.lines ?? []).filter((line) =>
                 getPetLineText(line).trim()
               ).length;
+              const presetTargets = presetVoiceOverview?.targets.filter(
+                (target) => target.kind === "event-line" && target.event === event.id
+              ) ?? [];
+              const readyPresetCount = presetTargets.filter((target) => target.status === "ready").length;
 
               return (
                 <article className="eventTile" key={event.id}>
@@ -343,6 +359,7 @@ export function EventLinesPanel({
                       <span>
                         候选台词
                         <em>{candidateLineCount} 条</em>
+                        {presetTargets.length ? <em className="eventPresetVoiceCoverage">语音 {readyPresetCount} / {presetTargets.length}</em> : null}
                       </span>
                       <button
                         className="eventAddLineButton"

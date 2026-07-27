@@ -47,6 +47,12 @@ import type {
 import type { StartupRendererStage } from "../shared/types/startup";
 import type { LocalPetMoodSettingsDraft, PetMoodEnterPreviewRequest, PetMoodMeterPosition, PetMoodVoiceImportRequest, PetMoodVoiceRemoveRequest } from "../shared/types/mood";
 import type { SystemMoodEvent } from "../shared/mood";
+import type {
+  PresetVoiceDeleteOneRequest,
+  PresetVoiceGenerationRequest,
+  PresetVoicePreviewRequest,
+  PresetVoiceTaskCancelRequest
+} from "../shared/types/presetVoice";
 import { cancelAiChatStreams, startAiChatStream } from "./services/ai/aiChat";
 import {
   getAiConnectionSummary,
@@ -126,6 +132,7 @@ import { revealMainWindowStartupSurface } from "./window";
 import { validateIpcArguments } from "./ipcValidation";
 import { assertIpcPetIdBound, assertIpcSenderAllowed, type IpcAccess } from "./ipcAccess";
 import { startupProfiler } from "./startupProfiler";
+import { presetVoiceGenerationService } from "./services/presetVoice/PresetVoiceGenerationService";
 
 export function registerIpc(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | null): void {
   let moodRangeEventId = 0;
@@ -275,6 +282,22 @@ export function registerIpc(ipcMain: IpcMain, getMainWindow: () => BrowserWindow
     return { display: await moodService.getDisplayState(petId), settings: pet?.moodSettings };
   });
 
+  const presetVoiceSucceededByPet = new Map<string, number>();
+  presetVoiceGenerationService.onProgress((snapshot) => {
+    const mainWindow = getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("preset-voice:progress", snapshot);
+    }
+    const previousSucceeded = presetVoiceSucceededByPet.get(snapshot.petId) ?? 0;
+    if (snapshot.succeeded > previousSucceeded) {
+      presetVoiceSucceededByPet.set(snapshot.petId, snapshot.succeeded);
+      void getLocalPetDefinition(snapshot.petId)
+        .then((pet) => emitPetConfigChanged(pet))
+        .catch(() => undefined);
+    }
+    if (snapshot.status !== "running") presetVoiceSucceededByPet.delete(snapshot.petId);
+  });
+
   moodService.subscribeMutations((petId, result) => {
     if (!result.enteredRangeId) return;
     void getLocalPetDefinition(petId).then((pet) => {
@@ -321,6 +344,48 @@ export function registerIpc(ipcMain: IpcMain, getMainWindow: () => BrowserWindow
     const available = pet.expressionSources?.some((candidate) => candidate.sourceKind === source.sourceKind && candidate.sourceFileName === source.sourceFileName && String(candidate.runtimeName ?? "") === String(source.runtimeName ?? ""));
     if (!available) return { ok: false, message: "所选进入表现源已失效，请重新选择。", state: getPetWindowState() };
     return previewPetWindowSource({ id: pet.id, name: pet.name, modelPath: pet.modelPath, avatar: pet.avatar, definition: toPetRuntimeDefinition(pet) }, source);
+  });
+
+  handle("preset-voice:get-overview", "main", (_event, petId: string) =>
+    presetVoiceGenerationService.getOverview(petId)
+  );
+
+  handle("preset-voice:get-task", "main", (_event, petId: string) =>
+    presetVoiceGenerationService.getTask(petId)
+  );
+
+  handle("preset-voice:start", "main", (_event, request: PresetVoiceGenerationRequest) =>
+    presetVoiceGenerationService.start(request)
+  );
+
+  handle("preset-voice:cancel", "main", (_event, request: PresetVoiceTaskCancelRequest) => ({
+    ...(() => {
+      const ok = presetVoiceGenerationService.cancel(request.petId, request.taskId);
+      return { ok, message: ok ? "已请求取消预设语音生成任务。" : "没有找到可取消的生成任务。" };
+    })()
+  }));
+
+  handle("preset-voice:preview", "main", (_event, request: PresetVoicePreviewRequest) =>
+    presetVoiceGenerationService.preview(request.petId, request.targetId)
+  );
+
+  handle("preset-voice:delete-all", "main", async (_event, petId: string) => {
+    const result = await presetVoiceGenerationService.deleteAll(petId);
+    if (result.pet) emitPetConfigChanged(result.pet);
+    const { pet: _pet, ...publicResult } = result;
+    return publicResult;
+  });
+
+  handle("preset-voice:delete-one", "main", async (_event, request: PresetVoiceDeleteOneRequest) => {
+    const result = await presetVoiceGenerationService.deleteOne(request.petId, request.targetId);
+    if (result.pet) emitPetConfigChanged(result.pet);
+    const { pet: _pet, ...publicResult } = result;
+    return publicResult;
+  });
+
+  handle("preset-voice:load-runtime", "pet", (event, request: PresetVoicePreviewRequest) => {
+    assertPetIdBound("preset-voice:load-runtime", event, request.petId);
+    return presetVoiceGenerationService.preview(request.petId, request.targetId);
   });
 
   handle("mood:get-display-state", "pet", async (event) => {
@@ -466,6 +531,7 @@ export function registerIpc(ipcMain: IpcMain, getMainWindow: () => BrowserWindow
       }
     }
 
+    await presetVoiceGenerationService.disposePet(petId);
     const result = await memoryManagementService.runPetDeletion(
       petId,
       () => deleteLocalPet(petId, { finalizeDeletion: deleteAiConnection })

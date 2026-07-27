@@ -1,4 +1,4 @@
-import type { PetExpressionSourceItem, PetMoodSettings } from "./pet";
+import type { PetExpressionSourceItem, PetLine, PetMoodSettings } from "./pet";
 import type { PetMoodRangeId, SystemMoodEvent } from "../mood";
 
 export interface PetMoodMeterPosition { left: number; top: number }
@@ -17,7 +17,7 @@ export interface PetMoodRangeEnteredEvent {
   id: number;
   rangeId: PetMoodRangeId;
   source?: PetExpressionSourceItem;
-  line?: string;
+  line?: PetLine;
 }
 export interface PetMoodEditorState { display: PetMoodDisplayState; settings?: PetMoodSettings }
 export interface LocalPetMoodSettingsDraft { petId: string; settings: PetMoodSettings }

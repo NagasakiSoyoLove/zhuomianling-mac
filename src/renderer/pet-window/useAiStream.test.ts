@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PetDefinition } from "../../shared/types/pet";
 import type { SpeechFrontendSettings } from "../services/speech/speechSettings";
 import {
+  appendVoiceErrorMessage,
   buildInterruptedReplyText,
   createAiStreamSettingsSnapshot,
   enqueueSafeStreamingVoiceChunk,
@@ -61,6 +62,17 @@ describe("AI stream settings snapshot", () => {
 });
 
 describe("safe AI stream presentation", () => {
+  it("keeps a voice playback failure in chat without duplicating it", () => {
+    const messages = [{ id: 1, role: "pet" as const, text: "正常回复" }];
+    const withError = appendVoiceErrorMessage(messages, "语音未播放：无法解码。", 2);
+    expect(withError.at(-1)).toMatchObject({
+      role: "pet",
+      status: "error",
+      text: "语音未播放：无法解码。"
+    });
+    expect(appendVoiceErrorMessage(withError, "语音未播放：无法解码。", 3)).toBe(withError);
+  });
+
   it("uses only normalized IPC content for streaming chat and subtitles", () => {
     expect(selectSafeAiStreamPresentation({ content: "安全聊天正文" })).toEqual({
       replyText: "安全聊天正文"

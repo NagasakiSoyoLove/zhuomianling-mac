@@ -684,3 +684,103 @@ describe("pet-resource protocol handler boundary", () => {
     expect(electronMock.netFetch).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("preset voice resource cleanup", () => {
+  it("removes deleted line audio only after its final event or mood reference is gone", async () => {
+    await writeLegacyPet();
+    const config = JSON.parse(await fs.readFile(getPetConfigPath(), "utf8")) as PetDefinition;
+    const sharedAudio = {
+      schemaVersion: 1 as const,
+      resourceId: "shared_audio",
+      sourceTextHash: "a".repeat(64),
+      spokenText: "共享台词",
+      language: "zh" as const,
+      mimeType: "audio/wav",
+      voiceFingerprint: "b".repeat(64),
+      generatedAt: 1
+    };
+    const moodOnlyAudio = {
+      ...sharedAudio,
+      resourceId: "mood_only_audio",
+      sourceTextHash: "c".repeat(64),
+      spokenText: "心情台词"
+    };
+    config.lines = {
+      click: [{ id: "event_line", text: "共享台词", presetAudio: sharedAudio }]
+    };
+    config.moodSettings = {
+      ranges: {
+        calm: {
+          enterLine: { id: "calm_line", text: "共享台词", presetAudio: sharedAudio }
+        },
+        joyful: {
+          enterLine: { id: "joyful_line", text: "心情台词", presetAudio: moodOnlyAudio }
+        }
+      }
+    };
+    await fs.writeFile(getPetConfigPath(), JSON.stringify(config, null, 2), "utf8");
+    const presetDirectory = path.join(getPetDirectory(), "voice", "presets");
+    const sharedPath = path.join(presetDirectory, "shared_audio.wav");
+    const moodOnlyPath = path.join(presetDirectory, "mood_only_audio.wav");
+    await fs.mkdir(presetDirectory, { recursive: true });
+    await Promise.all([
+      fs.writeFile(sharedPath, "shared", "utf8"),
+      fs.writeFile(moodOnlyPath, "mood", "utf8")
+    ]);
+
+    const { saveLocalPetEventSettings, saveLocalPetMoodSettings } = await import("./petConfigStore");
+    const eventResult = await saveLocalPetEventSettings({
+      petId: "pet-a",
+      events: [{ event: "click", lines: [] }]
+    });
+
+    expect(eventResult.ok).toBe(true);
+    await expect(fs.access(sharedPath)).resolves.toBeUndefined();
+
+    const moodResult = await saveLocalPetMoodSettings({ petId: "pet-a", settings: {} });
+
+    expect(moodResult.ok).toBe(true);
+    await expect(fs.access(sharedPath)).rejects.toThrow();
+    await expect(fs.access(moodOnlyPath)).rejects.toThrow();
+  });
+
+  it("clears one binding without orphaning a resource that another line still references", async () => {
+    await writeLegacyPet();
+    const config = JSON.parse(await fs.readFile(getPetConfigPath(), "utf8")) as PetDefinition;
+    const sharedAudio = {
+      schemaVersion: 1 as const,
+      resourceId: "shared_single_audio",
+      sourceTextHash: "a".repeat(64),
+      spokenText: "共享台词",
+      language: "zh" as const,
+      mimeType: "audio/wav",
+      voiceFingerprint: "b".repeat(64),
+      generatedAt: 1
+    };
+    config.lines = {
+      click: [{ id: "event-shared", text: "共享台词", presetAudio: sharedAudio }]
+    };
+    config.moodSettings = {
+      ranges: {
+        calm: { enterLine: { id: "mood-shared", text: "共享台词", presetAudio: sharedAudio } }
+      }
+    };
+    await fs.writeFile(getPetConfigPath(), JSON.stringify(config, null, 2), "utf8");
+
+    const { clearLocalPetPresetAudioTarget, getLocalPetDefinition } = await import("./petConfigStore");
+    const { collectPresetVoiceTargets } = await import("../presetVoice/presetVoiceTargets");
+    const pet = (await getLocalPetDefinition("pet-a"))!;
+    const eventTarget = collectPresetVoiceTargets(pet).find((target) => target.targetId === "event-shared")!;
+    const first = await clearLocalPetPresetAudioTarget({ petId: "pet-a", target: eventTarget });
+
+    expect(first.removed?.resourceId).toBe("shared_single_audio");
+    expect(first.shouldDeleteFile).toBe(false);
+
+    const nextPet = (await getLocalPetDefinition("pet-a"))!;
+    const moodTarget = collectPresetVoiceTargets(nextPet).find((target) => target.targetId === "mood-shared")!;
+    const second = await clearLocalPetPresetAudioTarget({ petId: "pet-a", target: moodTarget });
+
+    expect(second.removed?.resourceId).toBe("shared_single_audio");
+    expect(second.shouldDeleteFile).toBe(true);
+  });
+});

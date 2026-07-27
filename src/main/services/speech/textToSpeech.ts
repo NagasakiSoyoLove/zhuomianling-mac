@@ -586,6 +586,38 @@ async function synthesizeText(
   };
 }
 
+export interface PresetTextToSpeechResult extends TextToSpeechResponse {
+  resolvedMoodRange?: PetMoodRangeId;
+}
+
+/** Main-process synthesis used by explicit preset generation jobs, without a renderer owner. */
+export async function synthesizePresetText(
+  request: TextToSpeechRequest,
+  options: {
+    signal: AbortSignal;
+    language: "zh" | "ja" | "en";
+    moodRangeId?: PetMoodRangeId;
+  }
+): Promise<PresetTextToSpeechResult> {
+  let resolvedMoodRange: PetMoodRangeId | undefined;
+  const petConfig = (async () => {
+    const base = await resolvePetVoiceConfig(request.petId);
+    if (!options.moodRangeId) return { ...base, textLang: options.language };
+    const override = await resolveMoodVoiceOverride(request.petId, options.moodRangeId)
+      .catch(() => undefined);
+    resolvedMoodRange = override?.resolvedMoodRange;
+    return override
+      ? { ...base, ...override, textLang: options.language }
+      : { ...base, textLang: options.language };
+  })();
+  const response = await synthesizeText(request, {
+    signal: options.signal,
+    petConfig,
+    abortWarmup: true
+  });
+  return { ...response, ...(resolvedMoodRange ? { resolvedMoodRange } : {}) };
+}
+
 export async function speakText(
   target: WebContents,
   request: TextToSpeechRequest,

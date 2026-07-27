@@ -1,4 +1,4 @@
-import { BrowserWindow, Menu } from "electron";
+import { BrowserWindow, Menu, systemPreferences } from "electron";
 import path from "node:path";
 import { getAppIconPath } from "./appIcon";
 import { hardenWindowNavigation } from "./windowSecurity";
@@ -8,6 +8,61 @@ let startupSurfaceWindow: BrowserWindow | undefined;
 let hasRevealedStartupSurface = false;
 let hasSentStartupShownEvent = false;
 let fallbackShowTimer: NodeJS.Timeout | undefined;
+
+const mainWindowCloseAnimationMs = 170;
+const mainWindowCloseFrameMs = 16;
+
+function shouldAnimateMainWindowClose(): boolean {
+  if (process.platform !== "win32") {
+    return false;
+  }
+
+  try {
+    const animationSettings = systemPreferences.getAnimationSettings();
+    return animationSettings.shouldRenderRichAnimation && !animationSettings.prefersReducedMotion;
+  } catch {
+    return true;
+  }
+}
+
+export async function hideMainWindowForShutdown(targetWindow: BrowserWindow): Promise<void> {
+  if (targetWindow.isDestroyed()) {
+    return;
+  }
+
+  if (!targetWindow.isVisible() || !shouldAnimateMainWindowClose()) {
+    targetWindow.hide();
+    return;
+  }
+
+  const startedAt = performance.now();
+
+  await new Promise<void>((resolve) => {
+    const animateFrame = (): void => {
+      if (targetWindow.isDestroyed()) {
+        resolve();
+        return;
+      }
+
+      const progress = Math.min(1, (performance.now() - startedAt) / mainWindowCloseAnimationMs);
+      targetWindow.setOpacity(Math.max(0, 1 - progress * progress));
+
+      if (progress >= 1) {
+        resolve();
+        return;
+      }
+
+      setTimeout(animateFrame, mainWindowCloseFrameMs);
+    };
+
+    animateFrame();
+  });
+
+  if (!targetWindow.isDestroyed()) {
+    targetWindow.hide();
+    targetWindow.setOpacity(1);
+  }
+}
 
 function clearFallbackShowTimer(): void {
   if (!fallbackShowTimer) {

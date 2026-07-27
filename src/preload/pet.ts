@@ -28,6 +28,7 @@ import type {
 } from "../shared/types/window";
 import type { MoodMutationResult, PetMoodDisplayState, PetMoodMeterPosition, PetMoodRangeEnteredEvent } from "../shared/types/mood";
 import type { SystemMoodEvent } from "../shared/mood";
+import type { PresetVoicePreviewRequest, PresetVoicePreviewResult } from "../shared/types/presetVoice";
 
 const petDesktopApi = {
   mood: {
@@ -78,6 +79,10 @@ const petDesktopApi = {
       ipcRenderer.invoke("text-to-speech:speak", request) as Promise<TextToSpeechResponse>,
     stop: (request?: TextToSpeechStopRequest) =>
       ipcRenderer.invoke("text-to-speech:stop", request) as Promise<TextToSpeechStopResponse>
+  },
+  presetVoice: {
+    load: (request: PresetVoicePreviewRequest) =>
+      ipcRenderer.invoke("preset-voice:load-runtime", request) as Promise<PresetVoicePreviewResult>
   },
   speechStream: {
     start: (request: SpeechStreamStartRequest) =>

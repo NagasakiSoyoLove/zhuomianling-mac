@@ -69,6 +69,18 @@ import type {
 } from "../shared/types/memory";
 import type { StartupRendererStage } from "../shared/types/startup";
 import type { LocalPetMoodSettingsDraft, PetMoodEditorState, PetMoodEnterPreviewRequest, PetMoodVoiceImportRequest, PetMoodVoiceImportResult, PetMoodVoiceRemoveRequest } from "../shared/types/mood";
+import type {
+  PresetVoiceDeleteOneRequest,
+  PresetVoiceGenerationRequest,
+  PresetVoiceDeleteResult,
+  PresetVoiceOverview,
+  PresetVoicePreviewRequest,
+  PresetVoicePreviewResult,
+  PresetVoiceTaskCancelRequest,
+  PresetVoiceTaskCancelResult,
+  PresetVoiceTaskSnapshot,
+  PresetVoiceTaskStartResult
+} from "../shared/types/presetVoice";
 
 const startupTimingEnabled = process.env.ZHUOMIANLING_STARTUP_TIMING === "1";
 
@@ -147,6 +159,31 @@ const desktopPetApi = {
     importRangeVoice: (request: PetMoodVoiceImportRequest) => ipcRenderer.invoke("mood:import-range-voice", request) as Promise<PetMoodVoiceImportResult>,
     removeRangeVoice: (request: PetMoodVoiceRemoveRequest) => ipcRenderer.invoke("mood:remove-range-voice", request) as Promise<LocalPetSaveResult>,
     previewEnterSource: (request: PetMoodEnterPreviewRequest) => ipcRenderer.invoke("mood:preview-enter-source", request) as Promise<PetWindowSourcePreviewResult>
+  },
+  presetVoice: {
+    getOverview: (petId: string) =>
+      ipcRenderer.invoke("preset-voice:get-overview", petId) as Promise<PresetVoiceOverview>,
+    getTask: (petId: string) =>
+      ipcRenderer.invoke("preset-voice:get-task", petId) as Promise<PresetVoiceTaskSnapshot | undefined>,
+    start: (request: PresetVoiceGenerationRequest) =>
+      ipcRenderer.invoke("preset-voice:start", request) as Promise<PresetVoiceTaskStartResult>,
+    cancel: (request: PresetVoiceTaskCancelRequest) =>
+      ipcRenderer.invoke("preset-voice:cancel", request) as Promise<PresetVoiceTaskCancelResult>,
+    preview: (request: PresetVoicePreviewRequest) =>
+      ipcRenderer.invoke("preset-voice:preview", request) as Promise<PresetVoicePreviewResult>,
+    deleteOne: (request: PresetVoiceDeleteOneRequest) =>
+      ipcRenderer.invoke("preset-voice:delete-one", request) as Promise<PresetVoiceDeleteResult>,
+    deleteAll: (petId: string) =>
+      ipcRenderer.invoke("preset-voice:delete-all", petId) as Promise<PresetVoiceDeleteResult>,
+    onProgress: (callback: (snapshot: PresetVoiceTaskSnapshot) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, snapshot: PresetVoiceTaskSnapshot): void => {
+        callback(snapshot);
+      };
+      ipcRenderer.on("preset-voice:progress", listener);
+      return () => {
+        ipcRenderer.off("preset-voice:progress", listener);
+      };
+    }
   },
   live2dImport: {
     selectFolder: () =>

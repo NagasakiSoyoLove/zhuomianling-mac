@@ -152,6 +152,18 @@
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.eventLinesHeader > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.eventPresetVoiceCoverage {
+  color: #24783b;
+  background: #eaf7ed;
+}
+
 .eventLineList {
   display: grid;
   gap: 8px;

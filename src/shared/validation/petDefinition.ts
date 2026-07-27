@@ -1,5 +1,7 @@
 import type {
   PetDefinition,
+  PetLine,
+  PetPresetAudio,
   PetMoodSettings,
   PetVoiceLanguage,
   PetVoiceModelSettings
@@ -48,6 +50,94 @@ function booleanOrDefault(value: unknown, fallback: boolean, fieldName: string):
   }
 
   return value;
+}
+
+const presetLineIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const presetResourceIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const sha256Pattern = /^[a-f0-9]{64}$/;
+
+function normalizePresetAudio(value: unknown, fieldName: string): PetPresetAudio | undefined {
+  if (value === undefined || value === null) return undefined;
+  const audio = recordOrEmpty(value, fieldName);
+  const resourceId = stringOrDefault(audio.resourceId, "", `${fieldName}.resourceId`).trim();
+  const sourceTextHash = stringOrDefault(audio.sourceTextHash, "", `${fieldName}.sourceTextHash`).trim();
+  const spokenText = stringOrDefault(audio.spokenText, "", `${fieldName}.spokenText`).trim();
+  const voiceFingerprint = stringOrDefault(audio.voiceFingerprint, "", `${fieldName}.voiceFingerprint`).trim();
+  const personaFingerprint = audio.personaFingerprint === undefined
+    ? undefined
+    : stringOrDefault(audio.personaFingerprint, "", `${fieldName}.personaFingerprint`).trim();
+  const mimeType = stringOrDefault(audio.mimeType, "", `${fieldName}.mimeType`).trim().toLowerCase();
+  const language = String(audio.language);
+  const generatedAt = Number(audio.generatedAt);
+  const durationMs = audio.durationMs === undefined ? undefined : Number(audio.durationMs);
+
+  if (
+    audio.schemaVersion !== 1 ||
+    !presetResourceIdPattern.test(resourceId) ||
+    !sha256Pattern.test(sourceTextHash) ||
+    !spokenText || spokenText.length > 2_000 ||
+    !["zh", "ja", "en"].includes(language) ||
+    !/^audio\/[a-z0-9.+-]{1,64}$/.test(mimeType) ||
+    !sha256Pattern.test(voiceFingerprint) ||
+    (personaFingerprint !== undefined && !sha256Pattern.test(personaFingerprint)) ||
+    !Number.isSafeInteger(generatedAt) || generatedAt <= 0 ||
+    (durationMs !== undefined && (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 30 * 60_000)) ||
+    (audio.requestedMoodRange !== undefined && !isPetMoodRangeId(audio.requestedMoodRange)) ||
+    (audio.resolvedMoodRange !== undefined && !isPetMoodRangeId(audio.resolvedMoodRange))
+  ) {
+    throw new Error(`${fieldName} 的预设语音元数据无效。`);
+  }
+
+  return {
+    schemaVersion: 1,
+    resourceId,
+    sourceTextHash,
+    spokenText,
+    language: language as PetPresetAudio["language"],
+    mimeType,
+    ...(durationMs === undefined ? {} : { durationMs: Math.round(durationMs) }),
+    voiceFingerprint,
+    ...(personaFingerprint === undefined ? {} : { personaFingerprint }),
+    ...(audio.requestedMoodRange === undefined ? {} : { requestedMoodRange: audio.requestedMoodRange }),
+    ...(audio.resolvedMoodRange === undefined ? {} : { resolvedMoodRange: audio.resolvedMoodRange }),
+    generatedAt
+  };
+}
+
+export function normalizePetLineValue(
+  value: unknown,
+  fieldName: string,
+  maxTextLength = 2_000
+): PetLine {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text || text.length > maxTextLength) throw new Error(`${fieldName} 的台词无效。`);
+    return text;
+  }
+
+  const line = recordOrEmpty(value, fieldName);
+  const text = stringOrDefault(line.text, "", `${fieldName}.text`).trim();
+  const id = line.id === undefined ? undefined : stringOrDefault(line.id, "", `${fieldName}.id`).trim();
+  const audioPath = line.audioPath === undefined
+    ? undefined
+    : stringOrDefault(line.audioPath, "", `${fieldName}.audioPath`).trim();
+
+  if (
+    !text || text.length > maxTextLength ||
+    (id !== undefined && !presetLineIdPattern.test(id)) ||
+    (audioPath !== undefined && (!audioPath || audioPath.length > 2_048 || audioPath.includes("\0")))
+  ) {
+    throw new Error(`${fieldName} 的台词无效。`);
+  }
+
+  const presetAudio = normalizePresetAudio(line.presetAudio, `${fieldName}.presetAudio`);
+
+  return {
+    ...(id === undefined ? {} : { id }),
+    text,
+    ...(presetAudio ? { presetAudio } : {}),
+    ...(audioPath === undefined ? {} : { audioPath })
+  };
 }
 
 function stringArrayOrDefault(value: unknown, fallback: string[], fieldName: string): string[] {
@@ -147,11 +237,15 @@ export function normalizePetMoodSettings(value: unknown): PetMoodSettings | unde
       };
     }
     if (range.enterLine !== undefined) {
-      const line = stringOrDefault(range.enterLine, "", `moodSettings.ranges.${rangeId}.enterLine`).trim();
-      if (!line || line.length > 300) {
+      try {
+        normalized.enterLine = normalizePetLineValue(
+          range.enterLine,
+          `moodSettings.ranges.${rangeId}.enterLine`,
+          300
+        );
+      } catch {
         throw new Error("心情进入台词无效。");
       }
-      normalized.enterLine = line;
     }
     if (range.voiceOverride !== undefined) {
       const voice = recordOrEmpty(range.voiceOverride, `moodSettings.ranges.${rangeId}.voiceOverride`);
@@ -178,6 +272,15 @@ export function normalizeLegacyPetDefinition(pet: PetDefinition): PetDefinition 
   const uiSettings = recordOrEmpty(rawPet.uiSettings, "uiSettings");
   const subtitleStyle = recordOrEmpty(rawPet.subtitleStyle, "subtitleStyle");
   const legacyScenes = details.scenes ?? details.scenarios;
+  const rawLines = recordOrEmpty(rawPet.lines, "lines");
+  const lines = Object.fromEntries(
+    Object.entries(rawLines).map(([eventName, value]) => {
+      if (!eventName.trim() || eventName.length > 128 || !Array.isArray(value) || value.length > 256) {
+        throw new Error(`桌宠配置字段 lines.${eventName} 的类型无效。`);
+      }
+      return [eventName, value.map((line, index) => normalizePetLineValue(line, `lines.${eventName}.${index}`))];
+    })
+  ) as PetDefinition["lines"];
 
   return {
     ...pet,
@@ -207,6 +310,7 @@ export function normalizeLegacyPetDefinition(pet: PetDefinition): PetDefinition 
       features: Array.isArray(details.features) ? details.features : []
     },
     voiceModelSettings: normalizeVoiceModelSettings(rawPet.voiceModelSettings),
+    lines,
     moodSettings: normalizePetMoodSettings(rawPet.moodSettings),
     uiSettings: {
       ...uiSettings,

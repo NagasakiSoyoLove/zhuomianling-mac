@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, protocol, session } from "electron";
 import path from "node:path";
-import { createMainWindow } from "./window";
+import { createMainWindow, hideMainWindowForShutdown } from "./window";
 import { registerIpc } from "./ipc";
 import { closePetWindow, isPetWindowWebContents } from "./petWindow";
 import { createAppTray } from "./tray";
@@ -23,6 +23,7 @@ import {
   shutdownAutomaticMemoryCaptures
 } from "./services/memory/memoryCapture";
 import { startupProfiler } from "./startupProfiler";
+import { presetVoiceGenerationService } from "./services/presetVoice/PresetVoiceGenerationService";
 
 let mainWindow: Electron.BrowserWindow | null = null;
 let isQuitting = false;
@@ -53,6 +54,7 @@ protocol.registerSchemesAsPrivileged([
 async function runShutdownCleanup(): Promise<void> {
   const cleanup = (async () => {
     stopManagedGptSoVitsApi();
+    await presetVoiceGenerationService.shutdown();
     await shutdownAutomaticMemoryCaptures();
     await shutdownAllMemorySidecars();
     await resetLocalPetVoiceRuntimeState();
@@ -199,13 +201,31 @@ if (!gotLock) {
     startupProfiler.markOnce("main-startup-scheduled", "主进程启动任务已全部提交");
 
     mainWindow.on("close", (event) => {
-      if (isQuitting) {
+      if (shutdownCleanupCompleted) {
         return;
       }
 
       event.preventDefault();
+
+      if (isQuitting) {
+        return;
+      }
+
       isQuitting = true;
-      void closePetWindow({ playEffect: false })
+      const targetWindow = mainWindow;
+
+      if (!targetWindow || targetWindow.isDestroyed()) {
+        app.quit();
+        return;
+      }
+
+      void Promise.all([
+        hideMainWindowForShutdown(targetWindow),
+        closePetWindow({ playEffect: false })
+      ])
+        .catch(() => {
+          console.warn("Failed to finish the window shutdown transition.");
+        })
         .finally(() => app.quit());
     });
 

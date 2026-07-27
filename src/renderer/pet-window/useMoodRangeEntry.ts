@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PetMoodRangeEnteredEvent } from "../../shared/types/mood";
+import type { PetLine } from "../../shared/types/pet";
 
 export function useMoodRangeEntry(options: {
   busy: boolean;
   trigger: (source: NonNullable<PetMoodRangeEnteredEvent["source"]>) => void;
-  speak: (line: string) => void;
+  speak: (line: PetLine) => void;
 }): void {
   const optionsRef = useRef(options);
   const pendingRef = useRef<PetMoodRangeEnteredEvent>();

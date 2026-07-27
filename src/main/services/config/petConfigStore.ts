@@ -34,8 +34,10 @@ import type {
   PetFeature,
   PetLine,
   PetLineMap,
+  PetPresetAudio,
   PetVoiceModelVersion
 } from "../../../shared/types/pet";
+import type { PresetVoiceTarget } from "../../../shared/types/presetVoice";
 import { petMoodRanges } from "../../../shared/mood";
 import {
   petChatDecorationIcons,
@@ -56,6 +58,8 @@ import { petResourceProtocol, toPetResourceUrl } from "./petResourceProtocol";
 import { validateLive2DFolder } from "./live2dImportService";
 import { resolveLegacyVoiceModelPaths } from "./legacyVoiceModelPath";
 import { warmUpTextToSpeech } from "../speech/textToSpeech";
+import { hashPresetVoiceText } from "../presetVoice/presetVoiceFingerprint";
+import { removePresetVoiceAudio } from "../presetVoice/presetVoiceStorage";
 import {
   sanitizeVoiceDiagnosticText,
   validateReadableVoiceFile,
@@ -1645,6 +1649,7 @@ export async function saveLocalPetMoodSettings(
     }
     const nextPet: PetDefinition = { ...pet, moodSettings: settings, isLocal: true };
     await writePetConfigUnlocked(petId, nextPet);
+    await removeUnreferencedPresetAudio(petId, pet, nextPet);
     return { ok: true, message: "心情配置已保存。", pet: nextPet };
   });
 }
@@ -2195,12 +2200,217 @@ export async function saveLocalPetEventSettings(
   };
 
   await writePetConfigUnlocked(petId, nextPet);
+  await removeUnreferencedPresetAudio(petId, pet, nextPet);
 
   return {
     ok: true,
     message: "事件配置已保存。",
     pet: nextPet
   };
+  });
+}
+
+function collectPresetAudioReferences(pet: PetDefinition): Map<string, PetPresetAudio> {
+  const references = new Map<string, PetPresetAudio>();
+  const add = (line: PetLine | undefined): void => {
+    if (!line || typeof line === "string" || !line.presetAudio) return;
+    const audio = line.presetAudio;
+    references.set(`${audio.mimeType}\u0000${audio.resourceId}`, audio);
+  };
+
+  for (const eventLines of Object.values(pet.lines ?? {})) {
+    for (const line of eventLines ?? []) add(line);
+  }
+  for (const range of Object.values(pet.moodSettings?.ranges ?? {})) {
+    add(range?.enterLine);
+  }
+
+  return references;
+}
+
+async function removeUnreferencedPresetAudio(
+  petId: string,
+  previousPet: PetDefinition,
+  nextPet: PetDefinition
+): Promise<void> {
+  const previous = collectPresetAudioReferences(previousPet);
+  const next = collectPresetAudioReferences(nextPet);
+  await Promise.all([...previous].flatMap(([key, audio]) =>
+    next.has(key) ? [] : [removePresetVoiceAudio({ petId, ...audio })]
+  ));
+}
+
+export async function commitLocalPetPresetAudio(options: {
+  petId: string;
+  target: PresetVoiceTarget;
+  audio: PetPresetAudio;
+}): Promise<{ pet: PetDefinition; previousAudio?: PetPresetAudio }> {
+  const petId = assertValidPetId(options.petId);
+  return withPetWriteLock(petId, async () => {
+    const pet = await readPetConfigUnlocked(getPetConfigPath(petId), { forMutation: true });
+    if (!pet) throw new Error("当前桌宠配置不存在。");
+    let previousAudio: PetPresetAudio | undefined;
+    let changed = false;
+    const stableLineId = options.target.lineId ?? `line_${randomUUID().replace(/-/g, "")}`;
+
+    if (options.target.kind === "event-line") {
+      const event = options.target.event;
+      if (!event) throw new Error("事件台词目标无效。");
+      const currentLines = [...(pet.lines?.[event] ?? [])];
+      const indexById = options.target.lineId
+        ? currentLines.findIndex((line) => typeof line === "object" && line.id === options.target.lineId)
+        : -1;
+      const lineIndex = indexById >= 0 ? indexById : options.target.lineIndex ?? -1;
+      const currentLine = currentLines[lineIndex];
+      if (!currentLine || hashPresetVoiceText(getPetLineText(currentLine)) !== options.audio.sourceTextHash) {
+        throw new Error("台词在生成期间已修改，本次结果未保存。");
+      }
+      previousAudio = typeof currentLine === "object" ? currentLine.presetAudio : undefined;
+      currentLines[lineIndex] = {
+        ...(typeof currentLine === "object" ? currentLine : {}),
+        id: stableLineId,
+        text: getPetLineText(currentLine).trim(),
+        presetAudio: options.audio,
+        audioPath: undefined
+      };
+      pet.lines = { ...(pet.lines ?? {}), [event]: currentLines };
+      changed = true;
+    } else {
+      const rangeId = options.target.moodRangeId;
+      if (!rangeId) throw new Error("心情台词目标无效。");
+      const currentRange = pet.moodSettings?.ranges?.[rangeId];
+      const currentLine = currentRange?.enterLine;
+      if (!currentLine || hashPresetVoiceText(getPetLineText(currentLine)) !== options.audio.sourceTextHash) {
+        throw new Error("心情台词在生成期间已修改，本次结果未保存。");
+      }
+      if (options.target.lineId && (typeof currentLine !== "object" || currentLine.id !== options.target.lineId)) {
+        throw new Error("心情台词标识已变化，本次结果未保存。");
+      }
+      previousAudio = typeof currentLine === "object" ? currentLine.presetAudio : undefined;
+      pet.moodSettings = {
+        ...(pet.moodSettings ?? {}),
+        ranges: {
+          ...(pet.moodSettings?.ranges ?? {}),
+          [rangeId]: {
+            ...currentRange,
+            enterLine: {
+              ...(typeof currentLine === "object" ? currentLine : {}),
+              id: stableLineId,
+              text: getPetLineText(currentLine).trim(),
+              presetAudio: options.audio,
+              audioPath: undefined
+            }
+          }
+        }
+      };
+      changed = true;
+    }
+
+    if (!changed) throw new Error("没有找到待保存的预设台词。");
+    const nextPet = { ...pet, isLocal: true };
+    await writePetConfigUnlocked(petId, nextPet);
+    return { pet: nextPet, ...(previousAudio ? { previousAudio } : {}) };
+  });
+}
+
+export async function clearLocalPetPresetAudioTarget(options: {
+  petId: string;
+  target: PresetVoiceTarget;
+}): Promise<{
+  pet: PetDefinition;
+  removed?: PetPresetAudio;
+  shouldDeleteFile: boolean;
+}> {
+  const petId = assertValidPetId(options.petId);
+  return withPetWriteLock(petId, async () => {
+    const pet = await readPetConfigUnlocked(getPetConfigPath(petId), { forMutation: true });
+    if (!pet) throw new Error("当前桌宠配置不存在。");
+    let removed: PetPresetAudio | undefined;
+
+    if (options.target.kind === "event-line") {
+      const event = options.target.event;
+      if (!event) throw new Error("事件台词目标无效。");
+      const currentLines = [...(pet.lines?.[event] ?? [])];
+      const indexById = options.target.lineId
+        ? currentLines.findIndex((line) => typeof line === "object" && line.id === options.target.lineId)
+        : -1;
+      const lineIndex = indexById >= 0 ? indexById : options.target.lineIndex ?? -1;
+      const currentLine = currentLines[lineIndex];
+      if (!currentLine || hashPresetVoiceText(getPetLineText(currentLine)) !== hashPresetVoiceText(options.target.text)) {
+        throw new Error("台词已修改，请刷新后重试。");
+      }
+      if (typeof currentLine === "object" && currentLine.presetAudio) {
+        removed = currentLine.presetAudio;
+        const { presetAudio: _audio, ...rest } = currentLine;
+        currentLines[lineIndex] = rest;
+        pet.lines = { ...(pet.lines ?? {}), [event]: currentLines };
+      }
+    } else {
+      const rangeId = options.target.moodRangeId;
+      if (!rangeId) throw new Error("心情台词目标无效。");
+      const currentRange = pet.moodSettings?.ranges?.[rangeId];
+      const currentLine = currentRange?.enterLine;
+      if (!currentLine || hashPresetVoiceText(getPetLineText(currentLine)) !== hashPresetVoiceText(options.target.text)) {
+        throw new Error("心情台词已修改，请刷新后重试。");
+      }
+      if (typeof currentLine === "object" && currentLine.presetAudio) {
+        removed = currentLine.presetAudio;
+        const { presetAudio: _audio, ...rest } = currentLine;
+        pet.moodSettings = {
+          ...(pet.moodSettings ?? {}),
+          ranges: {
+            ...(pet.moodSettings?.ranges ?? {}),
+            [rangeId]: { ...currentRange, enterLine: rest }
+          }
+        };
+      }
+    }
+
+    if (!removed) return { pet, shouldDeleteFile: false };
+    const nextPet: PetDefinition = { ...pet, isLocal: true };
+    await writePetConfigUnlocked(petId, nextPet);
+    const key = `${removed.mimeType}\u0000${removed.resourceId}`;
+    return {
+      pet: nextPet,
+      removed,
+      shouldDeleteFile: !collectPresetAudioReferences(nextPet).has(key)
+    };
+  });
+}
+
+export async function clearLocalPetPresetAudio(petIdValue: string): Promise<{
+  pet: PetDefinition;
+  removed: PetPresetAudio[];
+}> {
+  const petId = assertValidPetId(petIdValue);
+  return withPetWriteLock(petId, async () => {
+    const pet = await readPetConfigUnlocked(getPetConfigPath(petId), { forMutation: true });
+    if (!pet) throw new Error("当前桌宠配置不存在。");
+    const removed: PetPresetAudio[] = [];
+    const lines = Object.fromEntries(Object.entries(pet.lines ?? {}).map(([event, eventLines]) => [
+      event,
+      (eventLines ?? []).map((line) => {
+        if (typeof line === "string" || !line.presetAudio) return line;
+        removed.push(line.presetAudio);
+        const { presetAudio: _audio, ...rest } = line;
+        return rest;
+      })
+    ])) as PetLineMap;
+    const ranges = Object.fromEntries(Object.entries(pet.moodSettings?.ranges ?? {}).map(([rangeId, range]) => {
+      const line = range?.enterLine;
+      if (!line || typeof line === "string" || !line.presetAudio) return [rangeId, range];
+      removed.push(line.presetAudio);
+      const { presetAudio: _audio, ...rest } = line;
+      return [rangeId, { ...range, enterLine: rest }];
+    })) as NonNullable<PetMoodSettings["ranges"]>;
+    const nextPet: PetDefinition = {
+      ...pet,
+      lines,
+      moodSettings: pet.moodSettings ? { ...pet.moodSettings, ranges } : undefined,
+      isLocal: true
+    };
+    if (removed.length) await writePetConfigUnlocked(petId, nextPet);
+    return { pet: nextPet, removed };
   });
 }
 

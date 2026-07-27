@@ -12,6 +12,7 @@ import {
   minPetDesktopScale
 } from "../shared/validation/petUiSettings";
 import { isPetVoiceModelVersion } from "../shared/validation/petVoiceModel";
+import { normalizePetLineValue } from "../shared/validation/petDefinition";
 import { isPetMoodRangeId, isSystemMoodEvent } from "../shared/mood";
 import { AI_PROMPT_LIMITS } from "../shared/aiContract";
 import {
@@ -82,6 +83,14 @@ export const validatedIpcChannels = new Set([
   "mood:import-range-voice",
   "mood:remove-range-voice",
   "mood:preview-enter-source",
+  "preset-voice:get-overview",
+  "preset-voice:get-task",
+  "preset-voice:start",
+  "preset-voice:cancel",
+  "preset-voice:preview",
+  "preset-voice:load-runtime",
+  "preset-voice:delete-all",
+  "preset-voice:delete-one",
   "mood:get-display-state",
   "mood:report-system-event",
   "mood:save-meter-position",
@@ -531,6 +540,40 @@ function validateCustomTheme(channel: string, value: unknown): void {
   }
 }
 
+function validatePetLine(
+  channel: string,
+  value: unknown,
+  label: string,
+  maxTextLength: number
+): void {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const line = assertRecord(channel, value, label);
+    assertAllowedKeys(channel, line, ["id", "text", "presetAudio", "audioPath"]);
+    if (line.presetAudio !== undefined) {
+      const audio = assertRecord(channel, line.presetAudio, `${label}.presetAudio`);
+      assertAllowedKeys(channel, audio, [
+        "schemaVersion",
+        "resourceId",
+        "sourceTextHash",
+        "spokenText",
+        "language",
+        "mimeType",
+        "durationMs",
+        "voiceFingerprint",
+        "personaFingerprint",
+        "requestedMoodRange",
+        "resolvedMoodRange",
+        "generatedAt"
+      ]);
+    }
+  }
+  try {
+    normalizePetLineValue(value, label, maxTextLength);
+  } catch (error) {
+    fail(channel, error instanceof Error ? error.message : `${label} 无效。`);
+  }
+}
+
 function validateAiChat(channel: string, value: unknown, requireRequestId: boolean): void {
   const request = assertRecord(channel, value);
   assertPetId(channel, request.petId);
@@ -621,9 +664,9 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
     for (const [id, raw] of Object.entries(ranges)) {
       if (!isPetMoodRangeId(id)) fail(channel, "包含未知心情区间。");
       const range = assertRecord(channel, raw); assertAllowedKeys(channel, range, ["enterSource", "enterLine", "voiceOverride"]);
-      if (range.enterLine !== undefined) assertString(channel, range.enterLine, "enterLine", 300);
+      if (range.enterLine !== undefined) validatePetLine(channel, range.enterLine, "enterLine", 300);
     }
-    assertSafePayload(channel, draft, { maxStringLength: 500, maxTotalStringLength: 8_000, maxObjectKeys: 128 });
+    assertSafePayload(channel, draft, { maxStringLength: 2_048, maxTotalStringLength: 8_000, maxObjectKeys: 128 });
     return;
   }
 
@@ -958,6 +1001,59 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
   if (channel === "ai-chat:stream") {
     expectArgumentCount(channel, args, 1);
     validateAiChat(channel, args[0], true);
+    return;
+  }
+
+  if (
+    channel === "preset-voice:get-overview" ||
+    channel === "preset-voice:get-task" ||
+    channel === "preset-voice:delete-all"
+  ) {
+    expectArgumentCount(channel, args, 1);
+    assertPetId(channel, args[0]);
+    return;
+  }
+
+  if (channel === "preset-voice:start") {
+    expectArgumentCount(channel, args, 1);
+    const request = assertRecord(channel, args[0]);
+    assertAllowedKeys(channel, request, ["petId", "scope", "targetId", "translation", "targetLanguage"]);
+    assertPetId(channel, request.petId);
+    if (request.scope !== "missing" && request.scope !== "all") fail(channel, "scope 无效。");
+    if (request.translation !== "source" && request.translation !== "translate") {
+      fail(channel, "translation 无效。");
+    }
+    if (
+      request.targetLanguage !== undefined &&
+      request.targetLanguage !== "zh" && request.targetLanguage !== "ja" && request.targetLanguage !== "en"
+    ) {
+      fail(channel, "targetLanguage 无效。");
+    }
+    if (request.translation === "translate" && request.targetLanguage === undefined) {
+      fail(channel, "AI 翻译必须指定 targetLanguage。");
+    }
+    if (request.targetId !== undefined) {
+      assertRequestId(channel, request.targetId, "targetId");
+    }
+    assertSafePayload(channel, request, { maxStringLength: 128, maxTotalStringLength: 640 });
+    return;
+  }
+
+  if (
+    channel === "preset-voice:cancel" ||
+    channel === "preset-voice:preview" ||
+    channel === "preset-voice:load-runtime" ||
+    channel === "preset-voice:delete-one"
+  ) {
+    expectArgumentCount(channel, args, 1);
+    const request = assertRecord(channel, args[0]);
+    assertAllowedKeys(channel, request, channel === "preset-voice:cancel" ? ["petId", "taskId"] : ["petId", "targetId"]);
+    assertPetId(channel, request.petId);
+    assertRequestId(
+      channel,
+      channel === "preset-voice:cancel" ? request.taskId : request.targetId,
+      channel === "preset-voice:cancel" ? "taskId" : "targetId"
+    );
     return;
   }
 

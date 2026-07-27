@@ -83,9 +83,11 @@ export interface SafeAiStreamPresentation {
 export interface UseAiStreamResult {
   cancel: (options?: { updateUi?: boolean }) => void;
   messages: ChatMessage[];
+  reportVoiceError: (text: string) => void;
   sendMessageText: (text: string, isVoiceTriggered?: boolean) => Promise<void>;
   sending: boolean;
   showStreamingReply: (pendingMessageId: number, replyText: string) => boolean;
+  typewriterActive: boolean;
 }
 
 const chatReplyTypewriterDelayMs = 34;
@@ -189,10 +191,26 @@ export function buildInterruptedReplyText(
     : `${interruptionLabel}。`;
 }
 
+export function appendVoiceErrorMessage(
+  messages: ChatMessage[],
+  text: string,
+  now = Date.now()
+): ChatMessage[] {
+  const normalizedText = text.trim();
+  if (!normalizedText) return messages;
+  const lastMessage = messages.at(-1);
+  if (lastMessage?.status === "error" && lastMessage.text === normalizedText) {
+    return messages;
+  }
+  const nextId = Math.max(now, ...messages.map((message) => message.id + 1));
+  return [...messages, { id: nextId, role: "pet", text: normalizedText, status: "error" }];
+}
+
 export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
   const optionsRef = useRef(options);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
+  const [typewriterActive, setTypewriterActive] = useState(false);
   const messagesRef = useRef<ChatMessage[]>([]);
   const sendingRef = useRef(false);
   const requestSequenceRef = useRef(0);
@@ -223,6 +241,7 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
     window.clearTimeout(typewriterTimerRef.current);
     typewriterTimerRef.current = undefined;
     typewriterPresentationRef.current = undefined;
+    setTypewriterActive(false);
   };
 
   const renderTypewriterProgress = (presentation: TypewriterPresentation): void => {
@@ -264,6 +283,7 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
       if (presentation.finalized) {
         renderTypewriterProgress(presentation);
         optionsRef.current.subtitle.finishTypewriterProgress(presentation.holdMs);
+        setTypewriterActive(false);
       }
       return;
     }
@@ -315,6 +335,7 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
       );
     }
 
+    setTypewriterActive(true);
     if (typewriterTimerRef.current === undefined) {
       advanceTypewriter(typewriterSequenceRef.current);
     }
@@ -699,11 +720,17 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
     }
   };
 
+  const reportVoiceError = (text: string): void => {
+    setMessages((current) => appendVoiceErrorMessage(current, text));
+  };
+
   return {
     cancel,
     messages,
+    reportVoiceError,
     sendMessageText,
     sending,
-    showStreamingReply
+    showStreamingReply,
+    typewriterActive
   };
 }

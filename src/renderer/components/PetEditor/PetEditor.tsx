@@ -21,6 +21,7 @@ import {
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type SetStateAction
@@ -63,6 +64,7 @@ import { ThemePanel } from "./ThemePanel";
 import { QuickActionsPanel } from "./QuickActionsPanel";
 import { VoiceInputPanel } from "./VoiceInputPanel";
 import { MoodPanel } from "./MoodPanel";
+import { PresetVoicePanel } from "./PresetVoicePanel";
 
 interface PetEditorProps {
   pets: PetDefinition[];
@@ -363,6 +365,9 @@ export function PetEditor({
           ) : null}
           {activePanel === "voiceReply" ? (
             <VoicePanel pet={selectedPet} onSavedPet={onSavedPet} onDirtyChange={setHasUnsavedChanges} />
+          ) : null}
+          {activePanel === "presetVoice" ? (
+            <PresetVoicePanel pet={selectedPet} onDirtyChange={setHasUnsavedChanges} />
           ) : null}
           {activePanel === "mood" ? <MoodPanel pet={selectedPet} onSavedPet={onSavedPet} onDirtyChange={setHasUnsavedChanges} /> : null}
         </div>
@@ -1049,7 +1054,8 @@ function VoicePanel({
   const [connectionState, setConnectionState] = useState<VoiceConnectionState>(
     initialVoiceDraft.connected ? "connected" : "failed"
   );
-  const [connectionPopup, setConnectionPopup] = useState<"connecting" | "success" | undefined>();
+  const [connectionPopup, setConnectionPopup] = useState<"connecting" | "connected" | "disconnected" | undefined>();
+  const connectionPopupTimerRef = useRef<number>();
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<LocalPetSaveResult | undefined>();
   const [saveResult, setSaveResult] = useState<LocalPetSaveResult | undefined>();
@@ -1059,6 +1065,24 @@ function VoicePanel({
   const serviceStatusText =
     connectionPopup === "connecting" ? "连接中" : connected ? "已连接" : "未连接";
   const popupHost = document.getElementById("editor-canvas-overlay") ?? document.body;
+
+  const showConnectionPopup = (nextPopup: "connecting" | "connected" | "disconnected" | undefined): void => {
+    if (connectionPopupTimerRef.current) {
+      window.clearTimeout(connectionPopupTimerRef.current);
+      connectionPopupTimerRef.current = undefined;
+    }
+    setConnectionPopup(nextPopup);
+    if (nextPopup === "connected" || nextPopup === "disconnected") {
+      connectionPopupTimerRef.current = window.setTimeout(() => {
+        setConnectionPopup(undefined);
+        connectionPopupTimerRef.current = undefined;
+      }, 1200);
+    }
+  };
+
+  useEffect(() => () => {
+    if (connectionPopupTimerRef.current) window.clearTimeout(connectionPopupTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (!result || result === saveResult) {
@@ -1124,7 +1148,7 @@ function VoicePanel({
   };
 
   const connectVoiceService = async (): Promise<void> => {
-    setConnectionPopup("connecting");
+    showConnectionPopup("connecting");
     setSaveResult(undefined);
     const connectionResult = await window.desktopPet?.petConfig.testVoiceModelConnection(draft);
 
@@ -1138,7 +1162,7 @@ function VoicePanel({
 
       if (!saveResult?.ok || !saveResult.pet) {
         setConnectionState("failed");
-        setConnectionPopup(undefined);
+        showConnectionPopup(undefined);
         setResult({
           ok: false,
           message: saveResult?.message ?? "连接成功，但保存连接状态失败。"
@@ -1152,13 +1176,12 @@ function VoicePanel({
       setResult(undefined);
       onDirtyChange(false);
       onSavedPet?.(saveResult.pet);
-      setConnectionPopup("success");
-      window.setTimeout(() => setConnectionPopup(undefined), 1200);
+      showConnectionPopup("connected");
       return;
     }
 
     setConnectionState("failed");
-    setConnectionPopup(undefined);
+    showConnectionPopup(undefined);
     updateVoiceDraft({
       connected: false,
       enabled: false
@@ -1171,6 +1194,7 @@ function VoicePanel({
 
   const disconnectVoiceService = async (): Promise<void> => {
     const disconnectResult = await window.desktopPet?.petConfig.disconnectVoiceModel();
+    const disconnected = Boolean(disconnectResult?.ok);
     const disconnectedDraft = {
       ...draft,
       connected: false,
@@ -1178,14 +1202,14 @@ function VoicePanel({
     };
 
     setConnectionState("failed");
-    setConnectionPopup(undefined);
     setSaveResult(undefined);
     setDraft(disconnectedDraft);
     setSavedDraft(disconnectedDraft);
-    setResult({
-      ok: Boolean(disconnectResult?.ok),
-      message: disconnectResult?.message ?? "已断开连接。"
+    setResult(disconnected ? undefined : {
+      ok: false,
+      message: disconnectResult?.message ?? "断开连接失败。"
     });
+    showConnectionPopup(disconnected ? "disconnected" : undefined);
     onDirtyChange(false);
     onSavedPet?.({
       ...pet,
@@ -1268,16 +1292,14 @@ function VoicePanel({
     <div className="editorPanel voiceEditorPanel">
       {connectionPopup
         ? createPortal(
-            <div className="voiceConnectPopup" role="status" aria-live="polite">
-              <span className={connectionPopup === "connecting" ? "voiceConnectSpinner" : "voiceConnectSuccess"}>
+            <div className={`voiceConnectPopup voiceConnectionPopup ${connectionPopup === "connecting" ? "connecting" : "success"}`} role="status" aria-live="polite">
+              <span className="voiceConnectionIcon" aria-hidden="true">
                 {connectionPopup === "connecting" ? <LoaderCircle size={22} /> : <CheckCircle2 size={22} />}
               </span>
-              <strong>{connectionPopup === "connecting" ? "正在连接" : "成功连接"}</strong>
-              <p>
-                {connectionPopup === "connecting"
-                  ? "正在检查本地 GPT-SoVITS 服务和声音资源。"
-                  : "本地 GPT-SoVITS 服务已可用。"}
-              </p>
+              <div className="voiceConnectionCopy">
+                <strong>{connectionPopup === "connecting" ? "正在连接声音服务" : connectionPopup === "connected" ? "声音服务已连接" : "声音服务已断开"}</strong>
+                <p>{connectionPopup === "connecting" ? "正在检查 GPT-SoVITS 服务和声音资源。" : connectionPopup === "connected" ? "GPT-SoVITS 已就绪，可以生成和播放语音。" : "GPT-SoVITS 已断开，需要时可以重新连接。"}</p>
+              </div>
             </div>,
             popupHost
           )
@@ -1310,10 +1332,10 @@ function VoicePanel({
           </button>
         </div>
         <label className="formField">
-          <span>GPT-SoVITS 本地路径</span>
+          <span>GPT-SoVITS 本地根目录（完整文件夹路径）</span>
           <input
             value={draft.gptSoVitsRootPath ?? ""}
-            placeholder="例如：D:\\rvc\\GPT-SoVITS-v2pro"
+            placeholder="例如：D:\\gpt\\GPT-SoVITS-v2pro"
             onChange={(event) => updateVoiceDraft({ gptSoVitsRootPath: event.target.value })}
           />
         </label>

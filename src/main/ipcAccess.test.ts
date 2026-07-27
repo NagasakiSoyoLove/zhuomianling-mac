@@ -71,6 +71,12 @@ describe("assertIpcSenderAllowed", () => {
       "memory:export",
       "memory:save-settings",
       "memory:rebuild-index"
+      ,"preset-voice:get-overview"
+      ,"preset-voice:start"
+      ,"preset-voice:cancel"
+      ,"preset-voice:preview"
+      ,"preset-voice:delete-one"
+      ,"preset-voice:delete-all"
     ]) {
       expect(accessByChannel.get(channel)).toBe("main");
     }
@@ -80,6 +86,7 @@ describe("assertIpcSenderAllowed", () => {
       "text-to-speech:speak",
       "speech-stream:start",
       "pet-window:start-drag"
+      ,"preset-voice:load-runtime"
     ]) {
       expect(accessByChannel.get(channel)).toBe("pet");
     }
@@ -93,6 +100,7 @@ describe("assertIpcSenderAllowed", () => {
       "text-to-speech:speak",
       "text-to-speech:stop",
       "speech-stream:start"
+      ,"preset-voice:load-runtime"
     ]) {
       expect(ipcSource).toContain(`assertPetIdBound("${channel}", event, request.petId)`);
     }

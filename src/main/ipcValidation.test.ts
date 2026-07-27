@@ -94,6 +94,33 @@ describe("validateIpcArguments", () => {
     ).toThrow(/sessionId/);
   });
 
+  it("validates preset voice generation requests", () => {
+    expect(() => validateIpcArguments("preset-voice:start", [{
+      petId: "pet-a",
+      scope: "missing",
+      translation: "translate",
+      targetLanguage: "ja",
+      targetId: "line-ready"
+    }])).not.toThrow();
+    expect(() => validateIpcArguments("preset-voice:start", [{
+      petId: "pet-a",
+      scope: "missing",
+      translation: "translate"
+    }])).toThrow(/targetLanguage/);
+    expect(() => validateIpcArguments("preset-voice:cancel", [{
+      petId: "pet-a",
+      taskId: "../other-task"
+    }])).toThrow(/taskId/);
+    expect(() => validateIpcArguments("preset-voice:delete-one", [{
+      petId: "pet-a",
+      targetId: "line-ready"
+    }])).not.toThrow();
+    expect(() => validateIpcArguments("preset-voice:delete-one", [{
+      petId: "pet-a",
+      targetId: "../voice.wav"
+    }])).toThrow(/targetId/);
+  });
+
   it("accepts only bounded finite desktop scale settings", () => {
     const validDraft = {
       petId: "pet-a",
@@ -417,6 +444,36 @@ describe("validateIpcArguments", () => {
       ...request,
       settings: { ranges: { calm: { enterLine: "x".repeat(301) } } }
     }])).toThrow(/enterLine/);
+  });
+
+  it("accepts a mood entry line object with generated preset audio metadata", () => {
+    expect(() => validateIpcArguments("mood:save-settings", [{
+      petId: "pet-a",
+      settings: {
+        ranges: {
+          calm: {
+            enterLine: {
+              id: "mood_calm_line",
+              text: "我会慢慢平静下来的。",
+              presetAudio: {
+                schemaVersion: 1,
+                resourceId: "preset_mood_calm_01",
+                sourceTextHash: "a".repeat(64),
+                spokenText: "我会慢慢平静下来的。",
+                language: "zh",
+                mimeType: "audio/wav",
+                durationMs: 1_800,
+                voiceFingerprint: "b".repeat(64),
+                personaFingerprint: "c".repeat(64),
+                requestedMoodRange: "calm",
+                resolvedMoodRange: "calm",
+                generatedAt: 1_700_000_000_000
+              }
+            }
+          }
+        }
+      }
+    }])).not.toThrow();
   });
 
   it("still rejects a real circular payload", () => {

@@ -216,6 +216,7 @@ export function PetWindow(): JSX.Element {
     });
   }, []);
   const idleTimerRef = useRef<number | undefined>();
+  const clickThroughSpeechTimerRef = useRef<number | undefined>();
   const draftRef = useRef("");
   const chatOpenRef = useRef(false);
   const clickThroughRef = useRef(fallbackState.clickThrough);
@@ -225,6 +226,7 @@ export function PetWindow(): JSX.Element {
   const showSynchronizedReplyRef = useRef<(messageId: number, content: string) => void>(
     () => undefined
   );
+  const reportVoiceErrorRef = useRef<(text: string) => void>(() => undefined);
   const [state, setState] = useState<PetWindowState>(fallbackState);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatCollapsed, setChatCollapsed] = useState(false);
@@ -278,6 +280,7 @@ export function PetWindow(): JSX.Element {
     subtitle,
     triggerExpression,
     showVoiceMessage,
+    onVoiceError: (text) => reportVoiceErrorRef.current(text),
     onSynchronizedReveal: (messageId, content) =>
       showSynchronizedReplyRef.current(messageId, content),
     onPlaybackDrained: (restartContinuousConversation) =>
@@ -351,7 +354,7 @@ export function PetWindow(): JSX.Element {
         ?.map(normalizePresetLine)
         .filter(
           (line): line is PetPresetLine =>
-            Boolean(line?.text?.trim() || line?.audioPath?.trim())
+            Boolean(line?.text?.trim())
         ) ?? [];
 
     if (!normalizedLines.length) {
@@ -431,8 +434,10 @@ export function PetWindow(): JSX.Element {
       });
     }
 
-    if (pickedLine?.audioPath) {
-      void voiceReply.playPresetLineAudio(pickedLine.audioPath);
+    // The main process is authoritative for current audio metadata. The renderer may
+    // briefly hold an older config snapshot immediately after batch generation.
+    if (pickedLine?.id) {
+      void voiceReply.playPresetLineAudio(pickedLine.id);
     }
   };
 
@@ -446,7 +451,7 @@ export function PetWindow(): JSX.Element {
     const hasLine = Boolean(petDefinition?.lines?.[eventName]?.some((line: PetLine) => {
       const normalizedLine = normalizePresetLine(line);
 
-      return Boolean(normalizedLine?.text?.trim() || normalizedLine?.audioPath?.trim());
+      return Boolean(normalizedLine?.text?.trim());
     }));
 
     return hasSource || hasExpression || hasLine;
@@ -613,7 +618,10 @@ export function PetWindow(): JSX.Element {
     scheduleVoiceRestart: (isVoiceTriggered) =>
       scheduleVoiceRestartRef.current(isVoiceTriggered)
   });
-  const { messages, sending, sendMessageText } = aiStream;
+  const { messages, reportVoiceError, sending, sendMessageText, typewriterActive } = aiStream;
+  useLayoutEffect(() => {
+    reportVoiceErrorRef.current = reportVoiceError;
+  }, [reportVoiceError]);
   const windowDrag = useWindowDrag({
     chatCollapsed,
     chatOpen,
@@ -649,16 +657,22 @@ export function PetWindow(): JSX.Element {
   }, [aiStream, voiceRecorder.scheduleRestart]);
 
   useMoodRangeEntry({
-    busy: sending || voiceReply.hasActiveAudio() || closingEffect,
+    busy: sending || typewriterActive || voiceReply.hasActiveAudio() || closingEffect,
     trigger: (source) => triggerExpressionSource(source, "low"),
     speak: (line) => {
+      const normalizedLine = normalizePresetLine(line);
+      if (!normalizedLine?.text.trim()) return;
+      const text = normalizedLine.text.trim();
       if (petDefinition?.capabilities.subtitles && !voiceReply.isSubtitleHeld()) {
         subtitle.show({
-          text: line,
+          text,
           mode: "typewriter",
           tone: petDefinition.subtitleStyle?.tone,
           maxWidth: petDefinition.subtitleStyle?.maxWidth
         });
+      }
+      if (normalizedLine.id) {
+        void voiceReply.playPresetLineAudio(normalizedLine.id);
       }
     }
   });
@@ -669,6 +683,7 @@ export function PetWindow(): JSX.Element {
     return () => {
       window.clearTimeout(idleTimerRef.current);
       window.clearTimeout(moodClickTimerRef.current);
+      window.clearTimeout(clickThroughSpeechTimerRef.current);
     };
   }, []);
 
@@ -792,16 +807,20 @@ export function PetWindow(): JSX.Element {
       }
 
       setState(nextState);
-      triggerEventExpression(
-        nextState.clickThrough ? "clickThroughOn" : "clickThroughOff",
-        "normal",
-        nextState.clickThrough ? "ready" : "happy"
-      );
-      speakLine(
-        nextState.clickThrough ? "clickThroughOn" : "clickThroughOff",
-        nextState.clickThrough ? "我先把自己挪到不打扰你的状态。" : "我又可以和你互动啦。"
-      );
-      resetIdleTimer();
+      window.clearTimeout(clickThroughSpeechTimerRef.current);
+      clickThroughSpeechTimerRef.current = window.setTimeout(() => {
+        if (clickThroughRef.current !== nextState.clickThrough) return;
+        triggerEventExpression(
+          nextState.clickThrough ? "clickThroughOn" : "clickThroughOff",
+          "normal",
+          nextState.clickThrough ? "ready" : "happy"
+        );
+        speakLine(
+          nextState.clickThrough ? "clickThroughOn" : "clickThroughOff",
+          nextState.clickThrough ? "我先把自己挪到不打扰你的状态。" : "我又可以和你互动啦。"
+        );
+        resetIdleTimer();
+      }, 0);
     }
 
     setRadialMenuOpen(true);

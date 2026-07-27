@@ -22,7 +22,11 @@ async function probeDuration(filePath: string): Promise<number> {
   }));
 }
 
-export async function resolveMoodVoiceOverride(petId: string, rangeId: PetMoodRangeId): Promise<{ refAudioPath: string; promptText: string } | undefined> {
+export async function resolveMoodVoiceOverride(petId: string, rangeId: PetMoodRangeId): Promise<{
+  refAudioPath: string;
+  promptText: string;
+  resolvedMoodRange: PetMoodRangeId;
+} | undefined> {
   const id = assertValidPetId(petId);
   const configPath = path.join(app.getPath("userData"), "pets", id, "pet.local.json");
   const pet = normalizeLegacyPetDefinition(JSON.parse(await fs.readFile(configPath, "utf8")) as PetDefinition);
@@ -36,7 +40,11 @@ export async function resolveMoodVoiceOverride(petId: string, rangeId: PetMoodRa
       await validateReadableVoiceFile(realFile, "referenceAudio");
       const duration = await probeDuration(realFile);
       if (duration < 3 || duration > 10 || !override.referenceText.trim()) continue;
-      return { refAudioPath: realFile, promptText: override.referenceText.trim() };
+      return {
+        refAudioPath: realFile,
+        promptText: override.referenceText.trim(),
+        resolvedMoodRange: candidate
+      };
     } catch { continue; }
   }
   return undefined;

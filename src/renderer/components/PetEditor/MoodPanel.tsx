@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { FileAudio, Gauge, Play, Trash2, Volume2 } from "lucide-react";
 import { petMoodRanges, type PetMoodRangeId } from "../../../shared/mood";
 import type { LocalPetSaveResult, PetDefinition, PetMoodSettings } from "../../../shared/types/pet";
+import type { PresetVoiceOverview } from "../../../shared/types/presetVoice";
 import type { PetMoodDisplayState } from "../../../shared/types/mood";
 import { AppleSelect, PanelSaveActions } from "./EditorShared";
+import { getPetLineText } from "./petEditorDrafts";
 
 const defaultRangeId: PetMoodRangeId = "calm";
 
@@ -15,6 +17,7 @@ export function MoodPanel({ pet, onSavedPet, onDirtyChange }: { pet: PetDefiniti
   const [result, setResult] = useState<LocalPetSaveResult>();
   const [dirty, setDirty] = useState(false);
   const [voiceTexts, setVoiceTexts] = useState<Partial<Record<PetMoodRangeId, string>>>({});
+  const [presetVoiceOverview, setPresetVoiceOverview] = useState<PresetVoiceOverview>();
   const voiceConnected = Boolean(pet.voiceModelSettings?.connected && pet.voiceModelSettings.enabled);
   const sourceOptions = useMemo(() => [{ value: "", label: "无" }, ...(pet.expressionSources ?? []).map((source) => ({
     value: `${source.sourceKind}:${source.sourceFileName}:${String(source.runtimeName ?? "")}`,
@@ -41,6 +44,16 @@ export function MoodPanel({ pet, onSavedPet, onDirtyChange }: { pet: PetDefiniti
     });
     return () => { active = false; };
   }, [pet.id]);
+
+  useEffect(() => {
+    let active = true;
+    void window.desktopPet?.presetVoice.getOverview(pet.id).then((overview) => {
+      if (active) setPresetVoiceOverview(overview);
+    }).catch(() => {
+      if (active) setPresetVoiceOverview(undefined);
+    });
+    return () => { active = false; };
+  }, [pet.id, pet.moodSettings, pet.voiceModelSettings]);
 
   const updateRange = (id: PetMoodRangeId, patch: Record<string, unknown>): void => {
     setSettings((current) => ({ ranges: { ...(current.ranges ?? {}), [id]: { ...(current.ranges?.[id] ?? {}), ...patch } } }));
@@ -108,9 +121,13 @@ export function MoodPanel({ pet, onSavedPet, onDirtyChange }: { pet: PetDefiniti
   const isCalmRange = selectedRange.id === "calm";
   const rangeSettings = settings.ranges?.[selectedRange.id];
   const source = rangeSettings?.enterSource;
-  const enterLine = rangeSettings?.enterLine ?? "";
+  const enterLineValue = rangeSettings?.enterLine;
+  const enterLine = enterLineValue ? getPetLineText(enterLineValue) : "";
   const sourceValue = source ? `${source.sourceKind}:${source.sourceFileName}:${String(source.runtimeName ?? "")}` : "";
   const voice = rangeSettings?.voiceOverride;
+  const presetEnterTarget = presetVoiceOverview?.targets.find(
+    (target) => target.kind === "mood-enter-line" && target.moodRangeId === selectedRange.id
+  );
   const configuredRangeCount = petMoodRanges.filter((range) => {
     const current = settings.ranges?.[range.id];
     return Boolean(current?.enterSource || current?.enterLine || current?.voiceOverride);
@@ -209,9 +226,27 @@ export function MoodPanel({ pet, onSavedPet, onDirtyChange }: { pet: PetDefiniti
               value={enterLine}
               maxLength={300}
               placeholder="例如：我会慢慢平静下来的。"
-              onChange={(event) => updateRange(selectedRange.id, { enterLine: event.target.value || undefined })}
+              onChange={(event) => {
+                const text = event.target.value;
+                updateRange(selectedRange.id, {
+                  enterLine: text
+                    ? typeof enterLineValue === "object"
+                      ? { ...enterLineValue, text }
+                      : text
+                    : undefined
+                });
+              }}
             />
           </label>
+          {enterLine ? <p className={`moodPresetVoiceStatus ${presetEnterTarget?.status ?? "missing"}`}>
+            预设台词语音：{presetEnterTarget?.status === "ready"
+              ? "已生成"
+              : presetEnterTarget?.status === "stale"
+                ? "台词文字已修改，需在预设台词语音页重新生成"
+                : presetEnterTarget?.status === "invalid"
+                  ? "资源无效，需重新生成"
+                  : "未生成"}
+          </p> : null}
           {!source && !enterLine ? <p className="moodEmptyHint">未设置时，进入这个区间不会额外播放动作、表情或显示台词。</p> : null}
         </section>
 

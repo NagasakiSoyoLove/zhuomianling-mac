@@ -176,7 +176,7 @@ function getCurrentDragPoint(fallback: PetWindowDragPoint): PetWindowDragPoint {
   return fallback;
 }
 
-function normalizeCloseLineText(line: unknown): { text?: string; audioPath?: string } | undefined {
+function normalizeCloseLineText(line: unknown): { text?: string } | undefined {
   if (typeof line === "string") {
     return { text: line };
   }
@@ -185,11 +185,10 @@ function normalizeCloseLineText(line: unknown): { text?: string; audioPath?: str
     return undefined;
   }
 
-  const item = line as { text?: unknown; audioPath?: unknown };
+  const item = line as { text?: unknown };
 
   return {
-    text: typeof item.text === "string" ? item.text : undefined,
-    audioPath: typeof item.audioPath === "string" ? item.audioPath : undefined
+    text: typeof item.text === "string" ? item.text : undefined
   };
 }
 
@@ -202,7 +201,7 @@ function hasConfiguredPetEvent(pet: PetDefinition | undefined, eventName: PetLin
     pet?.lines?.[eventName]?.some((line) => {
       const normalizedLine = normalizeCloseLineText(line);
 
-      return Boolean(normalizedLine?.text?.trim() || normalizedLine?.audioPath?.trim());
+      return Boolean(normalizedLine?.text?.trim());
     })
   );
 

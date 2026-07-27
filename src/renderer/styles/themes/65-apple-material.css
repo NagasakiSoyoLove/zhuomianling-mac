@@ -191,6 +191,19 @@ textarea {
     var(--ui-shadow-soft);
 }
 
+.presetVoiceDialog {
+  border-color: rgba(255, 255, 255, 0.72);
+  border-radius: var(--ui-radius);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.62)),
+    var(--ui-glass);
+  backdrop-filter: blur(32px) saturate(180%) contrast(1.03);
+  -webkit-backdrop-filter: blur(32px) saturate(180%) contrast(1.03);
+  box-shadow:
+    var(--ui-highlight),
+    var(--ui-shadow-soft);
+}
+
 .selectorPane,
 .stagePane,
 .editorPanel,

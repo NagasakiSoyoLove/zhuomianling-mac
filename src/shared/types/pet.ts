@@ -39,8 +39,29 @@ export type BasePetLineEvent =
   | "modelError";
 
 export type PetLineEvent = BasePetLineEvent | (string & {});
+
+export interface PetPresetAudio {
+  schemaVersion: 1;
+  resourceId: string;
+  sourceTextHash: string;
+  spokenText: string;
+  language: PetVoiceLanguage;
+  mimeType: string;
+  durationMs?: number;
+  voiceFingerprint: string;
+  /** Present when spokenText was produced by persona-aware localization. */
+  personaFingerprint?: string;
+  requestedMoodRange?: PetMoodRangeId;
+  resolvedMoodRange?: PetMoodRangeId;
+  generatedAt: number;
+}
+
 export interface PetPresetLine {
+  /** Stable local identifier assigned when a legacy string line is first persisted as an object. */
+  id?: string;
   text: string;
+  presetAudio?: PetPresetAudio;
+  /** Legacy field retained for read compatibility. New preset audio never stores a path here. */
   audioPath?: string;
 }
 export type PetLine = string | PetPresetLine;
@@ -291,7 +312,7 @@ export interface PetMoodVoiceOverride {
 export interface PetMoodRangeSettings {
   enterSource?: PetExpressionSourceItem;
   /** 在进入此心情区间时显示的桌宠专属字幕。 */
-  enterLine?: string;
+  enterLine?: PetLine;
   voiceOverride?: PetMoodVoiceOverride;
 }
 

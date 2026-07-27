@@ -57,6 +57,7 @@ interface UseVoiceReplyQueueOptions {
     hold?: boolean
   ) => void;
   showVoiceMessage: (text: string, status?: "thinking" | "error") => void;
+  onVoiceError: (text: string) => void;
   onSynchronizedReveal: (pendingMessageId: number, replyText: string) => void;
   onPlaybackDrained: (restartContinuousConversation: boolean) => void;
 }
@@ -123,6 +124,77 @@ export function normalizeVoiceReplyText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function startsWithAscii(bytes: Uint8Array, offset: number, value: string): boolean {
+  return Array.from(value).every(
+    (character, index) => bytes[offset + index] === character.charCodeAt(0)
+  );
+}
+
+export function getVoiceAudioPayloadError(
+  audioBase64: string,
+  mimeType: string,
+  decodeBase64: (value: string) => string = (value) => window.atob(value)
+): string | undefined {
+  const normalizedBase64 = audioBase64.trim();
+  if (!normalizedBase64) {
+    return "语音未播放：声音模型没有返回音频数据。";
+  }
+
+  let binary: string;
+  try {
+    // File signatures fit in the first 18 decoded bytes; avoid decoding a
+    // potentially large reply twice before it is converted to a Blob.
+    binary = decodeBase64(normalizedBase64.slice(0, 24));
+  } catch {
+    return "语音未播放：声音模型返回了无法读取的音频数据。";
+  }
+
+  const bytes = Uint8Array.from(binary.slice(0, 16), (character) => character.charCodeAt(0));
+  const normalizedMimeType = mimeType.split(";", 1)[0]?.trim().toLowerCase();
+  const isWav = startsWithAscii(bytes, 0, "RIFF") && startsWithAscii(bytes, 8, "WAVE");
+  const isMp3 = startsWithAscii(bytes, 0, "ID3") || (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0);
+  const isOgg = startsWithAscii(bytes, 0, "OggS");
+  const isAac = bytes[0] === 0xff && (bytes[1] & 0xf6) === 0xf0;
+  const hasKnownDeclaredFormat =
+    normalizedMimeType === "audio/wav" ||
+    normalizedMimeType === "audio/x-wav" ||
+    normalizedMimeType === "audio/wave" ||
+    normalizedMimeType === "audio/vnd.wave" ||
+    normalizedMimeType === "audio/mpeg" ||
+    normalizedMimeType === "audio/ogg" ||
+    normalizedMimeType === "audio/aac";
+  const expectedFormatMatches =
+    ((normalizedMimeType === "audio/wav" ||
+      normalizedMimeType === "audio/x-wav" ||
+      normalizedMimeType === "audio/wave" ||
+      normalizedMimeType === "audio/vnd.wave") && isWav) ||
+    (normalizedMimeType === "audio/mpeg" && isMp3) ||
+    (normalizedMimeType === "audio/ogg" && isOgg) ||
+    (normalizedMimeType === "audio/aac" && isAac);
+
+  if (expectedFormatMatches) {
+    return undefined;
+  }
+
+  if (hasKnownDeclaredFormat && (isWav || isMp3 || isOgg || isAac)) {
+    return "语音未播放：声音模型返回的音频格式与声明格式不一致。";
+  }
+
+  if (isWav || isMp3 || isOgg || isAac) return undefined;
+
+  return "语音未播放：声音模型返回的不是有效的受支持音频。";
+}
+
+export function getVoicePlaybackErrorMessage(mediaErrorCode?: number): string {
+  if (mediaErrorCode === 3) {
+    return "语音未播放：当前环境无法解码生成的音频。";
+  }
+  if (mediaErrorCode === 4) {
+    return "语音未播放：当前环境不支持生成的音频格式。";
+  }
+  return "语音未播放：当前环境未能启动音频播放。";
+}
+
 function waitForRetry(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, delayMs);
@@ -134,6 +206,8 @@ export function useVoiceReplyQueue(
 ): UseVoiceReplyQueueResult {
   const optionsRef = useRef(options);
   const presetLineAudioRef = useRef<HTMLAudioElement | null>(null);
+  const presetLineUrlRef = useRef<string>();
+  const presetLineRequestRef = useRef(0);
   const voiceReplyAudioRef = useRef<HTMLAudioElement | null>(null);
   const activePlaybackCancelRef = useRef<(() => void) | undefined>();
   const voiceReplyUrlRef = useRef<string | undefined>();
@@ -145,6 +219,7 @@ export function useVoiceReplyQueue(
   const voiceSessionIdRef = useRef<string | undefined>();
   const textToSpeechRequestSequenceRef = useRef(0);
   const voiceConfigurationErrorRequestRef = useRef<number | undefined>();
+  const voiceErrorReportedRequestRef = useRef<number | undefined>();
   const subtitleHoldRef = useRef<{ requestId: number; active: boolean } | undefined>();
   const expressionHoldRef = useRef<{ requestId: number; active: boolean } | undefined>();
   const pendingExpressionRef = useRef<PetExpressionKey | undefined>();
@@ -155,6 +230,18 @@ export function useVoiceReplyQueue(
   const stopRef = useRef<(options?: { clearPresentation?: boolean }) => void>(
     () => undefined
   );
+
+  const reportVoiceError = (requestId: number, text: string): void => {
+    if (
+      requestId !== requestIdRef.current ||
+      voiceErrorReportedRequestRef.current === requestId
+    ) {
+      return;
+    }
+    voiceErrorReportedRequestRef.current = requestId;
+    optionsRef.current.showVoiceMessage(text, "error");
+    optionsRef.current.onVoiceError(text);
+  };
 
   const releaseSubtitle = (requestId: number): void => {
     const hold = subtitleHoldRef.current;
@@ -242,11 +329,17 @@ export function useVoiceReplyQueue(
         (!response.requestId || response.requestId === textToSpeechRequestId)
       ) {
         const mimeType = response.mimeType ?? "audio/wav";
+        const payloadError = getVoiceAudioPayloadError(response.audioBase64, mimeType);
+        if (payloadError) {
+          reportVoiceError(requestId, payloadError);
+          return undefined;
+        }
         const audio = createVoiceReplyAudioSafely(response.audioBase64, mimeType);
         if (audio) {
           pendingUrlsRef.current.add(audio.audioUrl);
           return audio;
         }
+        failureMessage = "语音未播放：生成的音频数据无法加载。";
       }
 
       if (response?.code === "CANCELED") {
@@ -258,7 +351,7 @@ export function useVoiceReplyQueue(
         voiceConfigurationErrorRequestRef.current = requestId;
         failureMessage = response.message?.trim() || "声音模型资源不可用，请重新配置并连接。";
         if (shouldShowMessage && requestId === requestIdRef.current) {
-          optionsRef.current.showVoiceMessage(`GPT-SoVITS：${failureMessage}`, "error");
+          reportVoiceError(requestId, `GPT-SoVITS：${failureMessage}`);
         }
         return undefined;
       }
@@ -273,7 +366,7 @@ export function useVoiceReplyQueue(
     }
 
     if (requestId === requestIdRef.current && failureMessage) {
-      optionsRef.current.showVoiceMessage(`GPT-SoVITS：${failureMessage}`, "error");
+      reportVoiceError(requestId, `GPT-SoVITS：${failureMessage}`);
     }
 
     return undefined;
@@ -366,7 +459,8 @@ export function useVoiceReplyQueue(
       audio = new Audio(audioUrl);
     } catch {
       window.URL.revokeObjectURL(audioUrl);
-      return true;
+      reportVoiceError(requestId, getVoicePlaybackErrorMessage());
+      return false;
     }
     voiceReplyAudioRef.current = audio;
     voiceReplyUrlRef.current = audioUrl;
@@ -401,14 +495,21 @@ export function useVoiceReplyQueue(
         finish(true);
       }, { once: true });
       audio.addEventListener("error", () => {
-        finish(true);
+        if (settled || requestId !== requestIdRef.current) {
+          return;
+        }
+        const message = getVoicePlaybackErrorMessage(audio.error?.code);
+        queueRef.current.items.splice(0);
+        finish(false);
+        reportVoiceError(requestId, message);
       }, { once: true });
       void audio.play().catch(() => {
         if (settled || requestId !== requestIdRef.current) {
           return;
         }
+        queueRef.current.items.splice(0);
         finish(false);
-        optionsRef.current.showVoiceMessage("语音已经生成，但当前环境阻止了自动播放。", "error");
+        reportVoiceError(requestId, getVoicePlaybackErrorMessage());
         releaseSubtitle(requestId);
         releaseExpression(requestId);
       });
@@ -545,6 +646,7 @@ export function useVoiceReplyQueue(
     }
     requestIdRef.current += 1;
     voiceConfigurationErrorRequestRef.current = undefined;
+    voiceErrorReportedRequestRef.current = undefined;
     syncRevealRef.current = undefined;
     subtitleHoldRef.current = undefined;
     expressionHoldRef.current = undefined;
@@ -556,6 +658,11 @@ export function useVoiceReplyQueue(
     voiceSessionIdRef.current = undefined;
     presetLineAudioRef.current?.pause();
     presetLineAudioRef.current = null;
+    presetLineRequestRef.current += 1;
+    if (presetLineUrlRef.current) {
+      window.URL.revokeObjectURL(presetLineUrlRef.current);
+      presetLineUrlRef.current = undefined;
+    }
     voiceReplyAudioRef.current?.pause();
     activePlaybackCancelRef.current?.();
     activePlaybackCancelRef.current = undefined;
@@ -626,18 +733,40 @@ export function useVoiceReplyQueue(
     return requestId;
   };
 
-  const playPresetLineAudio = async (audioPath: string): Promise<void> => {
-    const source = audioPath.trim();
-    if (!source || voiceReplyAudioRef.current || queueRef.current.playing) {
+  const playPresetLineAudio = async (targetId: string): Promise<void> => {
+    const normalizedTargetId = targetId.trim();
+    if (!normalizedTargetId || voiceReplyAudioRef.current || queueRef.current.playing) {
       return;
     }
-
+    const requestSequence = ++presetLineRequestRef.current;
     presetLineAudioRef.current?.pause();
-    const audio = new Audio(source);
+    if (presetLineUrlRef.current) {
+      window.URL.revokeObjectURL(presetLineUrlRef.current);
+      presetLineUrlRef.current = undefined;
+    }
+    const response = await window.desktopPet?.presetVoice.load({
+      petId: optionsRef.current.petId,
+      targetId: normalizedTargetId
+    }).catch(() => undefined);
+    if (
+      requestSequence !== presetLineRequestRef.current ||
+      !response?.ok || !response.audioBase64 ||
+      voiceReplyAudioRef.current || queueRef.current.playing
+    ) {
+      return;
+    }
+    const created = createVoiceReplyAudioSafely(response.audioBase64, response.mimeType ?? "audio/wav");
+    if (!created) return;
+    presetLineUrlRef.current = created.audioUrl;
+    const audio = new Audio(created.audioUrl);
     presetLineAudioRef.current = audio;
     const cleanup = (): void => {
       if (presetLineAudioRef.current === audio) {
         presetLineAudioRef.current = null;
+      }
+      if (presetLineUrlRef.current === created.audioUrl) {
+        window.URL.revokeObjectURL(created.audioUrl);
+        presetLineUrlRef.current = undefined;
       }
     };
     audio.addEventListener("ended", cleanup, { once: true });

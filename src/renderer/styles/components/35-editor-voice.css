@@ -250,6 +250,64 @@
   color: #24783b;
 }
 
+.voiceConnectionPopup {
+  width: min(390px, calc(100vw - 48px));
+  min-height: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  place-items: initial;
+  align-items: center;
+  gap: 13px;
+  border-color: rgba(48, 61, 75, 0.12);
+  border-radius: 14px;
+  padding: 16px 18px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(247, 249, 251, 0.96)),
+    #f8fafb;
+  box-shadow: 0 18px 48px rgba(31, 42, 54, 0.14);
+  text-align: left;
+}
+
+.voiceConnectionIcon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid rgba(72, 88, 104, 0.12);
+  border-radius: 12px;
+  background: #f0f3f6;
+  color: #536273;
+}
+
+.voiceConnectionPopup.connecting .voiceConnectionIcon svg {
+  animation: voiceConnectSpin 780ms linear infinite;
+}
+
+.voiceConnectionPopup.success {
+  border-color: rgba(51, 112, 70, 0.16);
+}
+
+.voiceConnectionPopup.success .voiceConnectionIcon {
+  border-color: rgba(51, 112, 70, 0.12);
+  background: #edf6ef;
+  color: #39764a;
+}
+
+.voiceConnectionCopy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.voiceConnectionPopup .voiceConnectionCopy strong {
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.voiceConnectionPopup .voiceConnectionCopy p {
+  font-size: 12px;
+  font-weight: 720;
+}
+
 .voiceFeedbackPopup {
   width: min(380px, calc(100vw - 48px));
   min-height: 0;
@@ -1063,5 +1121,644 @@
   .moodValueMarker,
   .moodScaleOption {
     transition: none;
+  }
+}
+
+/* Cross-event preset voice library. */
+.moodPresetVoiceStatus {
+  margin: 0;
+  color: #607080;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.moodPresetVoiceStatus.ready {
+  color: #24783b;
+}
+
+.moodPresetVoiceStatus.stale,
+.moodPresetVoiceStatus.invalid {
+  color: #9a5d08;
+}
+
+.presetVoicePanel {
+  gap: 16px;
+}
+
+.presetVoicePanel .srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.presetVoiceTitleRow {
+  align-items: start;
+}
+
+.presetVoiceTitleActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.presetVoiceTitleActions .secondaryAction {
+  min-height: 32px;
+}
+
+.presetVoiceOverview {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid rgba(23, 32, 42, 0.09);
+  border-radius: 12px;
+  padding: 13px 14px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.presetVoiceOverviewCopy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.presetVoiceOverviewIcon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid rgba(72, 91, 108, 0.09);
+  border-radius: 11px;
+  background: #edf2f6;
+  color: #536779;
+}
+
+.presetVoiceOverviewCopy > div {
+  display: grid;
+  gap: 2px;
+}
+
+.presetVoiceOverviewCopy span,
+.presetVoiceCoverageMeta {
+  color: #607080;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.presetVoiceOverviewCopy strong {
+  color: #17202a;
+  font-size: 18px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.presetVoiceCoverage {
+  display: grid;
+  gap: 6px;
+}
+
+.presetVoiceProgressTrack {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(82, 96, 109, 0.12);
+}
+
+.presetVoiceProgressTrack > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2684ff, #55bfc0);
+  transition: width 220ms ease-out;
+}
+
+.presetVoiceCoverageMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  line-height: 1.2;
+}
+
+.presetVoiceCoverageMeta strong {
+  color: #415363;
+  font-size: 12px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.presetVoiceGenerateButton.primaryAction {
+  min-height: 36px;
+  border: 1px solid rgba(67, 91, 112, 0.12);
+  padding: 0 13px;
+  background: #e9f0f6;
+  color: #3e607c;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.presetVoiceGenerateButton.primaryAction:hover:not(:disabled) {
+  border-color: rgba(67, 91, 112, 0.18);
+  background: #e1ebf3;
+  color: #315573;
+  box-shadow: none;
+  transform: none;
+}
+
+.presetVoiceGenerateButton:disabled,
+.presetVoiceDialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.presetVoiceMessage {
+  margin: 0;
+}
+
+.presetVoiceTask {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid rgba(38, 132, 255, 0.2);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #f3f8ff;
+  color: #1766c2;
+}
+
+.presetVoiceTask > div {
+  display: grid;
+  gap: 2px;
+}
+
+.presetVoiceTask strong,
+.presetVoiceTask span {
+  font-size: 13px;
+}
+
+.presetVoiceTask span {
+  color: #607080;
+  font-weight: 750;
+}
+
+.presetVoiceSpinner {
+  animation: presetVoiceSpin 800ms linear infinite;
+}
+
+.presetVoiceTaskResult {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.presetVoiceTaskResult.success {
+  background: #eaf7ed;
+  color: #24783b;
+}
+
+.presetVoiceTaskResult.warning {
+  background: #fff7e8;
+  color: #8b5709;
+}
+
+.presetVoiceToolbar {
+  display: grid;
+  grid-template-columns: auto minmax(220px, 300px);
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.presetVoiceFilters {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  width: max-content;
+  border: 1px solid rgba(23, 32, 42, 0.06);
+  border-radius: 10px;
+  padding: 3px;
+  background: rgba(82, 96, 109, 0.07);
+}
+
+.presetVoiceFilters .secondaryAction {
+  min-height: 30px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0 11px;
+  background: transparent;
+  color: #627180;
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.presetVoiceFilters .secondaryAction:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.5);
+  color: #34495a;
+  box-shadow: none;
+  transform: none;
+}
+
+.presetVoiceFilters .secondaryAction.active {
+  background: rgba(255, 255, 255, 0.94);
+  color: #273d4e;
+  box-shadow: 0 1px 3px rgba(30, 43, 55, 0.1), inset 0 0 0 1px rgba(23, 32, 42, 0.05);
+}
+
+.presetVoiceSearch {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  border: 1px solid rgba(23, 32, 42, 0.12);
+  border-radius: 10px;
+  padding: 0 11px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #607080;
+}
+
+.presetVoiceSearch:focus-within {
+  border-color: rgba(38, 132, 255, 0.56);
+  box-shadow: 0 0 0 3px rgba(38, 132, 255, 0.12);
+}
+
+.presetVoiceSearch input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #17202a;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.presetVoiceGroups {
+  display: grid;
+  gap: 12px;
+}
+
+.presetVoiceGroup {
+  overflow: hidden;
+  border: 1px solid rgba(23, 32, 42, 0.09);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.presetVoiceGroup > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid rgba(23, 32, 42, 0.08);
+  padding: 11px 14px;
+  background: #f7f9fc;
+}
+
+.presetVoiceGroup > header strong {
+  color: #17202a;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.presetVoiceGroup > header span {
+  color: #607080;
+  font-size: 12px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+
+.presetVoiceGroup > div {
+  display: grid;
+}
+
+.presetVoiceLine {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 56px;
+  padding: 9px 12px 9px 14px;
+}
+
+.presetVoiceLine + .presetVoiceLine {
+  border-top: 1px solid rgba(23, 32, 42, 0.07);
+}
+
+.presetVoiceLine > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.presetVoiceLine > div > strong {
+  color: #17202a;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.presetVoiceStatus {
+  display: inline-flex;
+  align-items: center;
+  color: #607080;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.presetVoiceStatus.ready {
+  color: #24783b;
+}
+
+.presetVoiceStatus.stale,
+.presetVoiceStatus.invalid {
+  color: #9a5d08;
+}
+
+.presetVoiceLine .iconButton {
+  width: 38px;
+  height: 38px;
+}
+
+.presetVoiceLineActions {
+  display: flex !important;
+  grid-auto-flow: initial;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px !important;
+}
+
+.presetVoiceSingleGenerate {
+  min-height: 38px;
+  padding: 0 11px;
+  white-space: nowrap;
+}
+
+.presetVoiceLine .iconButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.36;
+}
+
+.presetVoiceEmpty {
+  display: flex;
+  min-height: 100px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  border: 1px dashed rgba(82, 96, 109, 0.22);
+  border-radius: 11px;
+  color: #607080;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.presetVoiceDialogBackdrop {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(17, 24, 39, 0.46);
+  pointer-events: auto;
+}
+
+.presetVoiceDialog {
+  display: grid;
+  width: min(560px, 100%);
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  gap: 18px;
+  border: 1px solid rgba(23, 32, 42, 0.1);
+  border-radius: 14px;
+  padding: 20px;
+  background: #fff;
+  box-shadow: 0 28px 80px rgba(17, 24, 39, 0.28);
+}
+
+.presetVoiceDialog > header,
+.presetVoiceDialog > header > div,
+.presetVoiceDialog > footer {
+  display: flex;
+  align-items: center;
+}
+
+.presetVoiceDialog > header {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.presetVoiceDialog > header > div {
+  gap: 11px;
+}
+
+.presetVoiceDialog > header > div > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 10px;
+  background: #eaf3ff;
+  color: #1766c2;
+}
+
+.presetVoiceDialog h3,
+.presetVoiceDialog p {
+  margin: 0;
+}
+
+.presetVoiceDialog h3 {
+  color: #17202a;
+  font-size: 17px;
+}
+
+.presetVoiceDialog p,
+.presetVoiceDialog small {
+  color: #607080;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.presetVoiceDialogTarget {
+  display: grid;
+  gap: 5px;
+  border: 1px solid rgba(38, 132, 255, 0.2);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #f5f9ff;
+}
+
+.presetVoiceDialogTarget span {
+  color: #607080;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.presetVoiceDialogTarget strong {
+  color: #17202a;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.presetVoiceDialog fieldset {
+  display: grid;
+  gap: 9px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.presetVoiceDialog legend {
+  margin-bottom: 7px;
+  color: #17202a;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.presetVoiceDialog fieldset > label:not(.presetVoiceLanguageSelect) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid rgba(23, 32, 42, 0.1);
+  border-radius: 10px;
+  padding: 11px 12px;
+  cursor: pointer;
+}
+
+.presetVoiceDialog fieldset > label:has(input:checked) {
+  border-color: rgba(38, 132, 255, 0.42);
+  background: #f3f8ff;
+}
+
+.presetVoiceDialog input[type="radio"] {
+  margin-top: 3px;
+  accent-color: #2684ff;
+}
+
+.presetVoiceDialog label > span {
+  display: grid;
+  gap: 2px;
+}
+
+.presetVoiceDialog label strong {
+  color: #17202a;
+  font-size: 13px;
+}
+
+.presetVoiceLanguageSelect {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0 0 28px;
+  color: #52606d;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.presetVoiceLanguageSelect .appleSelect {
+  width: 160px;
+  justify-self: end;
+}
+
+.presetVoiceDeleteDialog {
+  width: min(470px, 100%);
+}
+
+.presetVoiceDialog > header > div > .presetVoiceDeleteIcon {
+  border: 1px solid rgba(180, 35, 24, 0.12);
+  background: #fff1f0;
+  color: #a92a20;
+}
+
+.presetVoiceDeleteTarget {
+  border-color: rgba(180, 35, 24, 0.14);
+  background: #fff8f7;
+}
+
+.presetVoiceDeleteHint {
+  border-radius: 9px;
+  padding: 9px 11px;
+  background: #f5f7f9;
+  color: #52606d !important;
+}
+
+.presetVoiceDialog > footer {
+  justify-content: flex-end;
+  gap: 9px;
+  border-top: 1px solid rgba(23, 32, 42, 0.08);
+  padding-top: 16px;
+}
+
+@keyframes presetVoiceSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 760px) {
+  .presetVoiceOverview,
+  .presetVoiceToolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .presetVoiceGenerateButton,
+  .presetVoiceSearch {
+    width: 100%;
+  }
+
+  .presetVoiceFilters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .presetVoiceTask {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .presetVoiceTask .secondaryAction {
+    grid-column: 1 / -1;
+  }
+
+  .presetVoiceLine {
+    grid-template-columns: 1fr;
+  }
+
+  .presetVoiceLineActions {
+    justify-content: flex-start;
+  }
+
+  .presetVoiceLanguageSelect {
+    grid-template-columns: 1fr;
+    padding-left: 28px;
+  }
+
+  .presetVoiceLanguageSelect .appleSelect {
+    width: 100%;
+    justify-self: stretch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .presetVoiceProgressTrack > span {
+    transition: none;
+  }
+  .presetVoiceSpinner {
+    animation-duration: 1600ms;
   }
 }
