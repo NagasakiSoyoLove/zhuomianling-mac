@@ -34,6 +34,7 @@ app.setName("桌面灵");
 
 const userDataDirectoryName = "zhuomianling";
 const shutdownCleanupTimeoutMs = 5_000;
+const windowShutdownTransitionTimeoutMs = 1_000;
 
 app.setPath("userData", path.join(app.getPath("appData"), userDataDirectoryName));
 startupProfiler.markOnce("main-module-loaded", "主进程模块与 userData 路径初始化");
@@ -87,6 +88,23 @@ async function runShutdownCleanup(): Promise<void> {
   }
 }
 
+async function waitForWindowShutdownTransition(transition: Promise<unknown>): Promise<void> {
+  let timeout: NodeJS.Timeout | undefined;
+
+  try {
+    await Promise.race([
+      transition,
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, windowShutdownTransitionTimeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
 if (!gotLock) {
   app.quit();
 } else {
@@ -102,17 +120,24 @@ if (!gotLock) {
       })
       .finally(() => {
         shutdownCleanupCompleted = true;
-        app.quit();
+        // Cleanup has already completed (or reached its bounded timeout). Exit
+        // directly so a hidden BrowserWindow or lingering background handle
+        // cannot keep the single-instance lock alive without a visible window.
+        app.exit(0);
       });
   });
 
   app.on("second-instance", () => {
-    if (!mainWindow) {
+    if (!mainWindow || isQuitting) {
       return;
     }
 
     if (mainWindow.isMinimized()) {
       mainWindow.restore();
+    }
+
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
     }
 
     mainWindow.focus();
@@ -219,10 +244,12 @@ if (!gotLock) {
         return;
       }
 
-      void Promise.all([
-        hideMainWindowForShutdown(targetWindow),
-        closePetWindow({ playEffect: false })
-      ])
+      void waitForWindowShutdownTransition(
+        Promise.all([
+          hideMainWindowForShutdown(targetWindow),
+          closePetWindow({ playEffect: false })
+        ])
+      )
         .catch(() => {
           console.warn("Failed to finish the window shutdown transition.");
         })
