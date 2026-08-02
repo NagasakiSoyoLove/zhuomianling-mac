@@ -572,7 +572,7 @@ export function AiPanel({
               <span className="llmStep" aria-hidden="true">2</span>
               <div>
                 <h3 id="llm-model-title">选择模型</h3>
-                <p>获取服务提供的模型列表，或直接输入模型 ID。</p>
+                <p>先获取服务提供的模型列表，再从中选择要使用的模型。</p>
               </div>
             </div>
             <button
@@ -588,29 +588,20 @@ export function AiPanel({
 
           <label className="settingsField llmModelField">
             <span>模型 ID</span>
-            {models.length ? (
-              <AppleSelect
-                value={form.model}
-                disabled={formDisabled}
-                ariaLabel="模型 ID"
-                placeholder="请选择模型"
-                options={models.map((model) => ({
-                  value: model.id,
-                  label: model.name
-                }))}
-                onChange={(nextModel) => updateField("model", nextModel)}
-              />
-            ) : (
-              <input
-                value={form.model}
-                disabled={formDisabled}
-                onChange={(event) => updateField("model", event.target.value)}
-                placeholder="例如：grok-4.5"
-              />
-            )}
+            <AppleSelect
+              value={form.model}
+              disabled={formDisabled || !models.length}
+              ariaLabel="模型 ID"
+              placeholder={models.length ? "请选择模型" : "请先获取模型列表"}
+              options={models.map((model) => ({
+                value: model.id,
+                label: model.name
+              }))}
+              onChange={(nextModel) => updateField("model", nextModel)}
+            />
             <p className="llmFieldHint">
               <Info size={14} aria-hidden="true" />
-              <span>{models.length ? `已获取 ${models.length} 个模型，可从列表中选择。` : "没有模型列表时，也可以手动填写服务要求的模型 ID。"}</span>
+              <span>{models.length ? `已获取 ${models.length} 个模型，请从列表中选择。` : "请先点击“获取模型列表”，再从服务返回的模型中选择。"}</span>
             </p>
           </label>
         </section>
