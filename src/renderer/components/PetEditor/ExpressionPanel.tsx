@@ -204,17 +204,6 @@ function MappingKeyInput({
   );
 }
 
-function normalizeExpressionName(value: string | number | undefined): string {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\\/g, "/")
-    .split("/")
-    .pop()
-    ?.replace(/\.exp3\.json$/i, "")
-    .replace(/\.[^.]+$/i, "") ?? "";
-}
-
 function createRowId(source: Pick<MappingRowDraft, "sourceKind" | "sourceFileName">, index: number): string {
   return `${source.sourceKind}-${source.sourceFileName}-${index}`;
 }
@@ -224,16 +213,12 @@ function getSavedMappingKeyForSource(
   source: Pick<MappingRowDraft, "sourceKind" | "sourceFileName" | "runtimeName">,
   sourceIndex: number
 ): PetExpressionKey | undefined {
-  const sourceNames = [
-    normalizeExpressionName(source.runtimeName),
-    normalizeExpressionName(source.sourceFileName)
-  ];
   const savedMappingKeys = Object.keys(pet.expressions ?? {}) as PetExpressionKey[];
 
   return savedMappingKeys.find((key) => {
     const expressionValue = pet.expressions?.[key];
-    const mappedExpression = normalizeExpressionName(expressionValue);
-    const mappedSourceFile = normalizeExpressionName(pet.expressionSourceFiles?.[key]);
+    const mappedSourceKind = pet.expressionSourceKinds?.[key] ?? "expression";
+    const mappedSourceFile = pet.expressionSourceFiles?.[key];
     const matchesExpressionIndex =
       source.sourceKind === "expression" &&
       typeof expressionValue === "number" &&
@@ -241,8 +226,9 @@ function getSavedMappingKeyForSource(
 
     return Boolean(
       matchesExpressionIndex ||
-      (mappedExpression && sourceNames.includes(mappedExpression)) ||
-        (mappedSourceFile && sourceNames.includes(mappedSourceFile))
+      (mappedSourceKind === source.sourceKind &&
+        mappedSourceFile === source.sourceFileName &&
+        String(expressionValue ?? "") === String(source.runtimeName ?? ""))
     );
   });
 }

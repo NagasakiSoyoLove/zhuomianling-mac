@@ -394,6 +394,26 @@ describe("expression mapping persistence", () => {
       { sourceFileName: "angry01.mtn", runtimeName: "Tap", sourceKind: "motion" }
     ]);
   });
+
+  it("rejects mappings that do not reference an imported source", async () => {
+    await writeLegacyPet();
+    const configPath = getPetConfigPath();
+    const existing = JSON.parse(await fs.readFile(configPath, "utf8")) as Record<string, unknown>;
+    existing.expressionSources = [
+      { sourceFileName: "tap.motion3.json", runtimeName: "Tap", sourceKind: "motion" }
+    ];
+    await fs.writeFile(configPath, JSON.stringify(existing), "utf8");
+    const { saveLocalPetExpressionMappings } = await import("./petConfigStore");
+
+    const result = await saveLocalPetExpressionMappings({
+      petId: "pet-a",
+      mappings: [{ sourceFileName: "forged.motion3.json", runtimeName: "Tap", sourceKind: "motion", mappingKey: "tap", description: "测试" }],
+      sources: [{ sourceFileName: "forged.motion3.json", runtimeName: "Tap", sourceKind: "motion" }]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("不属于当前已导入");
+  });
 });
 
 describe("legacy Live2D model path migration", () => {
@@ -589,7 +609,11 @@ describe("GPT-SoVITS resource validation", () => {
     const gptModelPath = path.join(temporaryDirectory, "voice.ckpt");
     const missingReferencePath = path.join(temporaryDirectory, "moved-reference.wav");
     const logPath = path.resolve(process.cwd(), "logs", `gpt-sovits-${petId}.log`);
-    await fs.mkdir(voiceRootPath, { recursive: true });
+    await fs.mkdir(path.join(voiceRootPath, "runtime"), { recursive: true });
+    await fs.mkdir(path.join(voiceRootPath, "GPT_SoVITS", "pretrained_models", "chinese-roberta-wwm-ext-large"), { recursive: true });
+    await fs.mkdir(path.join(voiceRootPath, "GPT_SoVITS", "pretrained_models", "chinese-hubert-base"), { recursive: true });
+    await fs.writeFile(path.join(voiceRootPath, "runtime", "python.exe"), "python", "utf8");
+    await fs.writeFile(path.join(voiceRootPath, "api_v2.py"), "api", "utf8");
     await fs.writeFile(sovitsModelPath, "fixture", "utf8");
     await fs.writeFile(gptModelPath, "fixture", "utf8");
     await fs.mkdir(path.dirname(logPath), { recursive: true });
@@ -686,6 +710,27 @@ describe("pet-resource protocol handler boundary", () => {
 });
 
 describe("preset voice resource cleanup", () => {
+  it("persists a disabled event subtitle without requiring a custom line and removes the override when re-enabled", async () => {
+    await writeLegacyPet();
+    const { saveLocalPetEventSettings } = await import("./petConfigStore");
+
+    const disabledResult = await saveLocalPetEventSettings({
+      petId: "pet-a",
+      events: [{ event: "click", lines: [], showSubtitle: false }]
+    });
+
+    expect(disabledResult.ok).toBe(true);
+    expect(disabledResult.pet?.eventSettings?.click).toMatchObject({ showSubtitle: false });
+
+    const enabledResult = await saveLocalPetEventSettings({
+      petId: "pet-a",
+      events: [{ event: "click", lines: [], showSubtitle: true }]
+    });
+
+    expect(enabledResult.ok).toBe(true);
+    expect(enabledResult.pet?.eventSettings?.click).toBeUndefined();
+  });
+
   it("removes deleted line audio only after its final event or mood reference is gone", async () => {
     await writeLegacyPet();
     const config = JSON.parse(await fs.readFile(getPetConfigPath(), "utf8")) as PetDefinition;

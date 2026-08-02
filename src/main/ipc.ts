@@ -1,4 +1,4 @@
-import type { IpcMain, IpcMainEvent, IpcMainInvokeEvent } from "electron";
+import type { IpcMain, IpcMainEvent, IpcMainInvokeEvent, OpenDialogOptions } from "electron";
 import { app, BrowserWindow, dialog } from "electron";
 import path from "node:path";
 import type {
@@ -45,6 +45,8 @@ import type {
   MemoryUpdateRequest
 } from "../shared/types/memory";
 import type { StartupRendererStage } from "../shared/types/startup";
+import type { PetPackageImportAiModelsRequest, PetPackageImportAiRequest, PetPackageImportCancelRequest, PetPackageImportCommitRequest, PetPackageImportVoiceRequest } from "../shared/types/petPackage";
+import { sanitizePetPackageFileName } from "../shared/validation/petPackage";
 import type { LocalPetMoodSettingsDraft, PetMoodEnterPreviewRequest, PetMoodMeterPosition, PetMoodVoiceImportRequest, PetMoodVoiceRemoveRequest } from "../shared/types/mood";
 import type { SystemMoodEvent } from "../shared/mood";
 import type {
@@ -133,6 +135,9 @@ import { validateIpcArguments } from "./ipcValidation";
 import { assertIpcPetIdBound, assertIpcSenderAllowed, type IpcAccess } from "./ipcAccess";
 import { startupProfiler } from "./startupProfiler";
 import { presetVoiceGenerationService } from "./services/presetVoice/PresetVoiceGenerationService";
+import { exportPetPackage, inspectPetPackageExport } from "./services/petPackage/petPackageExportService";
+import { beginPetPackageImport, cancelPetPackageImport, commitPetPackageImport, listPetPackageImportAiModels, testPetPackageImportAi, testPetPackageImportVoice } from "./services/petPackage/petPackageImportService";
+import { cancelPetPackageOperation, onPetPackageProgress } from "./services/petPackage/petPackageOperation";
 
 export function registerIpc(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | null): void {
   let moodRangeEventId = 0;
@@ -219,6 +224,20 @@ export function registerIpc(ipcMain: IpcMain, getMainWindow: () => BrowserWindow
   onPetWindowStateChanged((state) => {
     for (const targetWindow of BrowserWindow.getAllWindows()) {
       targetWindow.webContents.send("pet-window:state-changed", state);
+    }
+  });
+
+  onPetPackageProgress((progress) => {
+    const mainWindow = getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send("pet-package:progress", progress);
+    if (progress.status === "running") {
+      mainWindow.setProgressBar(progress.percent ?? 2, { mode: progress.percent === undefined ? "indeterminate" : "normal" });
+    } else if (progress.status === "failed") {
+      mainWindow.setProgressBar(1, { mode: "error" });
+      setTimeout(() => { if (!mainWindow.isDestroyed()) mainWindow.setProgressBar(-1); }, 1200);
+    } else {
+      mainWindow.setProgressBar(-1);
     }
   });
 
@@ -586,6 +605,52 @@ export function registerIpc(ipcMain: IpcMain, getMainWindow: () => BrowserWindow
   handle("ai-settings:list", "main", () => listAiConnectionSummaries());
 
   handle("ai-settings:get", "main", (_event, petId: string) => getAiConnectionSummary(petId));
+
+  handle("pet-package:inspect-export", "main", (_event, petId: string) => inspectPetPackageExport(petId));
+
+  handle("pet-package:export", "main", async (_event, petId: string) => {
+    const pet = await getLocalPetDefinition(petId);
+    if (!pet) return { ok: false, message: "桌宠不存在。" };
+    const options = {
+      title: "导出桌宠",
+      defaultPath: path.join(app.getPath("documents"), sanitizePetPackageFileName(pet.name)),
+      filters: [{ name: "桌面灵桌宠包", extensions: ["zmling"] }]
+    };
+    const mainWindow = getMainWindow();
+    const selection = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
+    if (selection.canceled || !selection.filePath) return { ok: false, canceled: true, message: "已取消导出。" };
+    const destination = selection.filePath.toLowerCase().endsWith(".zmling") ? selection.filePath : `${selection.filePath}.zmling`;
+    return exportPetPackage(petId, destination);
+  });
+
+  handle("pet-package:begin-import", "main", async (event) => {
+    const options: OpenDialogOptions = { title: "导入桌宠", properties: ["openFile"], filters: [{ name: "桌面灵桌宠包", extensions: ["zmling"] }] };
+    const mainWindow = getMainWindow();
+    const selection = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+    if (selection.canceled || !selection.filePaths[0]) return { ok: false, canceled: true, message: "已取消选择。" };
+    return beginPetPackageImport(selection.filePaths[0], event.sender.id);
+  });
+
+  handle("pet-package:test-import-ai", "main", (event, request: PetPackageImportAiRequest) => testPetPackageImportAi(request, event.sender.id));
+  handle("pet-package:list-import-ai-models", "main", (event, request: PetPackageImportAiModelsRequest) => listPetPackageImportAiModels(request, event.sender.id));
+
+  handle("pet-package:pick-gpt-sovits-root", "main", async () => {
+    const options: OpenDialogOptions = { title: "选择 GPT-SoVITS 完整文件夹", properties: ["openDirectory"] };
+    const mainWindow = getMainWindow();
+    const selection = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+    return selection.canceled || !selection.filePaths[0]
+      ? { ok: false, canceled: true, message: "已取消选择。" }
+      : { ok: true, message: "已选择 GPT-SoVITS 目录。", directoryPath: selection.filePaths[0] };
+  });
+
+  handle("pet-package:test-import-voice", "main", (event, request: PetPackageImportVoiceRequest) => testPetPackageImportVoice(request.sessionId, request.gptSoVitsRootPath, event.sender.id));
+  handle("pet-package:commit-import", "main", async (event, request: PetPackageImportCommitRequest) => {
+    const result = await commitPetPackageImport(request.sessionId, event.sender.id);
+    if (result.ok && result.pet) emitPetConfigChanged(result.pet);
+    return { ...result, pet: result.pet ? toPublicPetDefinition(result.pet) : undefined };
+  });
+  handle("pet-package:cancel-import", "main", (event, request: PetPackageImportCancelRequest) => cancelPetPackageImport(request.sessionId, event.sender.id));
+  handle("pet-package:cancel-operation", "main", (_event, operationId: string) => ({ ok: cancelPetPackageOperation(operationId) }));
 
   handle("ai-settings:list-models", "main", (_event, draft: AiConnectionDraft) =>
     listAiModels(draft)

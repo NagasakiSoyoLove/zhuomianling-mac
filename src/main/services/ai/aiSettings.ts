@@ -30,6 +30,12 @@ interface AiSettingsFile {
   connections: Record<string, AiConnectionConfig>;
 }
 
+export interface VerifiedAiConnectionEvidence {
+  models: AiModelOption[];
+  outputCapability: AiOutputCapability;
+  checkedAt: string;
+}
+
 interface ParsedAiSettingsFile {
   settings: AiSettingsFile;
   legacySecrets: Array<{
@@ -46,10 +52,60 @@ interface ResolvedAiConnectionConfig extends AiConnectionConfig {
 
 const settingsFileName = "ai-connections.json";
 const aiApiKeyScope = "ai-api-key";
+const fullProtocolDowngradeThreshold = 3;
 
 let settingsMutationQueue: Promise<void> = Promise.resolve();
 let migrationPromise: Promise<void> | undefined;
 const petMutationQueues = new Map<string, Promise<void>>();
+const fullProtocolDowngradeFailures = new Map<string, number>();
+
+interface CapabilityStabilityDecision {
+  capability: AiOutputCapability;
+  retainedFullProtocolFailureCount?: number;
+}
+
+function getCapabilityStabilityKey(petId: string, baseUrl: string, model: string): string {
+  return `${petId}\0${normalizeAiBaseUrl(baseUrl)}\0${model.trim()}`;
+}
+
+function stabilizeOutputCapability(
+  petId: string,
+  existing: AiOutputCapability | undefined,
+  candidate: AiOutputCapability
+): CapabilityStabilityDecision {
+  const key = getCapabilityStabilityKey(petId, candidate.baseUrl, candidate.model);
+  if (candidate.protocolTier === "full") {
+    fullProtocolDowngradeFailures.delete(key);
+    return { capability: candidate };
+  }
+
+  const matchingFullCapability = existing?.protocolTier === "full" &&
+    normalizeAiBaseUrl(existing.baseUrl) === normalizeAiBaseUrl(candidate.baseUrl) &&
+    existing.model === candidate.model;
+  if (!matchingFullCapability) {
+    fullProtocolDowngradeFailures.delete(key);
+    return { capability: candidate };
+  }
+
+  const failureCount = (fullProtocolDowngradeFailures.get(key) ?? 0) + 1;
+  if (failureCount < fullProtocolDowngradeThreshold) {
+    fullProtocolDowngradeFailures.set(key, failureCount);
+    return {
+      capability: existing,
+      retainedFullProtocolFailureCount: failureCount
+    };
+  }
+
+  fullProtocolDowngradeFailures.delete(key);
+  return { capability: candidate };
+}
+
+function getCapabilityStabilityMessage(decision: CapabilityStabilityDecision): string {
+  if (decision.retainedFullProtocolFailureCount !== undefined) {
+    return `完整协议探测本次未通过（${decision.retainedFullProtocolFailureCount}/${fullProtocolDowngradeThreshold}），暂时保留已保存的完整协议。`;
+  }
+  return getCapabilityMessage(decision.capability);
+}
 
 function getSettingsPath(): string {
   return path.join(app.getPath("userData"), settingsFileName);
@@ -440,17 +496,20 @@ function getModelName(model: unknown): string {
 async function fetchAiModels(
   draft: AiConnectionDraft,
   apiKey: string,
-  checkedAt: string
+  checkedAt: string,
+  externalSignal?: AbortSignal
 ): Promise<AiModelListResult> {
   let response: Response;
 
   try {
+    const timeoutSignal = AbortSignal.timeout(15_000);
     response = await fetch(buildModelsUrl(draft.baseUrl), {
       method: "GET",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json"
-      }
+      },
+      signal: externalSignal ? AbortSignal.any([externalSignal, timeoutSignal]) : timeoutSignal
     });
   } catch {
     return {
@@ -547,7 +606,7 @@ export async function getAiConnectionConfig(
   };
 }
 
-export async function listAiModels(draft: AiConnectionDraft): Promise<AiModelListResult> {
+export async function listAiModels(draft: AiConnectionDraft, signal?: AbortSignal): Promise<AiModelListResult> {
   const normalized = normalizeDraft(draft);
   const checkedAt = new Date().toISOString();
 
@@ -572,7 +631,7 @@ export async function listAiModels(draft: AiConnectionDraft): Promise<AiModelLis
     return getMissingApiKeyResult(checkedAt, resolution.endpointChanged);
   }
 
-  return fetchAiModels(normalized, resolution.apiKey, checkedAt);
+  return fetchAiModels(normalized, resolution.apiKey, checkedAt, signal);
 }
 
 export async function testAiConnection(draft: AiConnectionDraft): Promise<AiConnectionTestResult> {
@@ -609,7 +668,8 @@ function getCapabilityProbeFailureMessage(
 }
 
 export async function testAiOutputCapability(
-  draft: AiConnectionDraft
+  draft: AiConnectionDraft,
+  signal?: AbortSignal
 ): Promise<AiOutputCapabilityTestResult> {
   const normalized = normalizeDraft(draft);
   const checkedAt = new Date().toISOString();
@@ -641,28 +701,39 @@ export async function testAiOutputCapability(
       baseUrl: normalized.baseUrl,
       model: normalized.model,
       apiKey: resolution.apiKey,
-      checkedAt
+      checkedAt,
+      signal
     });
 
     const existing = settings.connections[normalized.petId];
+    let stabilityDecision: CapabilityStabilityDecision | undefined;
     if (probe.tested && existing?.baseUrl === normalized.baseUrl && existing.model === normalized.model) {
       await runSettingsMutation(async () => {
         const latest = (await readSettingsFile()).settings;
         const current = latest.connections[normalized.petId];
         if (current?.baseUrl === normalized.baseUrl && current.model === normalized.model) {
-          current.outputCapability = probe.capability;
+          stabilityDecision = stabilizeOutputCapability(
+            normalized.petId,
+            current.outputCapability,
+            probe.capability
+          );
+          current.outputCapability = stabilityDecision.capability;
           await writeSettingsFile(latest);
         }
       });
     }
 
+    const effectiveCapability = stabilityDecision?.capability ?? probe.capability;
+
     return {
       ok: probe.tested,
       message: probe.tested
-        ? getCapabilityMessage(probe.capability)
+        ? stabilityDecision
+          ? getCapabilityStabilityMessage(stabilityDecision)
+          : getCapabilityMessage(probe.capability)
         : getCapabilityProbeFailureMessage(probe.failureKind, probe.status),
       checkedAt,
-      ...(probe.tested ? { capability: probe.capability } : {})
+      ...(probe.tested ? { capability: effectiveCapability } : {})
     };
   });
 }
@@ -691,7 +762,8 @@ export async function recordAiOutputCapability(
 }
 
 export async function saveAiConnection(
-  draft: AiConnectionDraft
+  draft: AiConnectionDraft,
+  verifiedEvidence?: VerifiedAiConnectionEvidence
 ): Promise<AiConnectionSaveResult> {
   const normalized = normalizeDraft(draft);
 
@@ -710,6 +782,25 @@ export async function saveAiConnection(
 
   return runPetMutation(normalized.petId, async () => {
     const checkedAt = new Date().toISOString();
+    const verifiedModels = verifiedEvidence ? normalizeModelOptions(verifiedEvidence.models) : undefined;
+    const verifiedCapability = verifiedEvidence
+      ? normalizeOutputCapability(verifiedEvidence.outputCapability, normalized.baseUrl, normalized.model)
+      : undefined;
+    if (verifiedEvidence && (
+      !verifiedCapability ||
+      verifiedCapability.confidence !== "tested" ||
+      !verifiedModels?.some((model) => model.id === normalized.model)
+    )) {
+      return {
+        config: toUnsavedSummary(normalized),
+        test: {
+          ok: false,
+          message: "导入会话中的 AI 检测结果无效，请重新检测。",
+          checkedAt,
+          code: "INVALID_AI_SETTINGS"
+        }
+      };
+    }
     let settings: AiSettingsFile;
     let resolution: Awaited<ReturnType<typeof resolveApiKey>>;
 
@@ -750,8 +841,13 @@ export async function saveAiConnection(
       };
     }
 
-    const modelsResult = await fetchAiModels(normalized, resolution.apiKey, checkedAt);
-    const capabilityProbe = modelsResult.ok && normalized.model
+    const modelsResult = verifiedEvidence ? {
+      ok: true,
+      message: "已复用导入向导中的 AI 检测结果。",
+      checkedAt: verifiedEvidence.checkedAt,
+      models: verifiedModels!
+    } satisfies AiModelListResult : await fetchAiModels(normalized, resolution.apiKey, checkedAt);
+    const capabilityProbe = !verifiedEvidence && modelsResult.ok && normalized.model
       ? await probeAiOutputCapability({
           baseUrl: normalized.baseUrl,
           model: normalized.model,
@@ -759,24 +855,30 @@ export async function saveAiConnection(
           checkedAt
         })
       : undefined;
-    const outputCapability = capabilityProbe?.tested
+    const outputCapability = verifiedCapability ?? (capabilityProbe?.tested
       ? capabilityProbe.capability
       : existingConfig?.baseUrl === normalized.baseUrl && existingConfig.model === normalized.model
         ? existingConfig.outputCapability
-        : undefined;
+        : undefined);
     const config: AiConnectionConfig = {
       petId: normalized.petId,
       providerName: normalized.providerName,
       baseUrl: normalized.baseUrl,
       model: normalized.model,
-      models: normalized.models?.length ? normalized.models : existingConfig?.models ?? [],
+      models: verifiedModels?.length
+        ? verifiedModels
+        : normalized.models?.length
+          ? normalized.models
+          : existingConfig?.models ?? [],
       outputCapability,
       updatedAt: new Date().toISOString()
     };
     const test: AiConnectionTestResult = {
       ok: modelsResult.ok,
       message: modelsResult.ok
-        ? `连接成功，设置已保存。${capabilityProbe
+        ? verifiedEvidence
+          ? "AI 设置已使用导入向导的检测结果保存。"
+          : `连接成功，设置已保存。${capabilityProbe
           ? ` ${capabilityProbe.tested
             ? getCapabilityMessage(capabilityProbe.capability)
             : getCapabilityProbeFailureMessage(capabilityProbe.failureKind, capabilityProbe.status)}`

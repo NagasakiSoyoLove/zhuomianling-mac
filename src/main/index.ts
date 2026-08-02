@@ -24,6 +24,8 @@ import {
 } from "./services/memory/memoryCapture";
 import { startupProfiler } from "./startupProfiler";
 import { presetVoiceGenerationService } from "./services/presetVoice/PresetVoiceGenerationService";
+import { cleanupInterruptedPetPackageImports, shutdownPetPackageImports } from "./services/petPackage/petPackageImportService";
+import { cancelAllPetPackageOperations } from "./services/petPackage/petPackageOperation";
 
 let mainWindow: Electron.BrowserWindow | null = null;
 let isQuitting = false;
@@ -54,6 +56,8 @@ protocol.registerSchemesAsPrivileged([
 
 async function runShutdownCleanup(): Promise<void> {
   const cleanup = (async () => {
+    cancelAllPetPackageOperations();
+    await shutdownPetPackageImports();
     stopManagedGptSoVitsApi();
     await presetVoiceGenerationService.shutdown();
     await shutdownAutomaticMemoryCaptures();
@@ -162,6 +166,11 @@ if (!gotLock) {
       "avatar-drafts-cleaned",
       "清理安全的头像草稿",
       cleanupOrphanedAvatarDrafts
+    );
+    await startupProfiler.measureOnce(
+      "pet-package-imports-cleaned",
+      "清理中断的桌宠包导入",
+      cleanupInterruptedPetPackageImports
     );
     await startupProfiler.measureOnce(
       "voice-runtime-reset",

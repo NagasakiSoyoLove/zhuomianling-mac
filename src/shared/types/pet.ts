@@ -72,6 +72,8 @@ export interface PetEventSettings {
   expressionDurationMs?: number;
   source?: PetExpressionSourceItem;
   sourceDurationMs?: number;
+  /** Defaults to true. When false, event lines may still play preset audio without showing a subtitle bubble. */
+  showSubtitle?: boolean;
   [key: string]: unknown;
 }
 

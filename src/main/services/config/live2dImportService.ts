@@ -491,18 +491,78 @@ function hasImportedLive2DModel(pet: PetDefinition): boolean {
   return Boolean(pet.modelPath || pet.live2dSettings);
 }
 
-function clearLive2DDependentConfig(pet: PetDefinition): PetDefinition {
-  const nextPet: PetDefinition = { ...pet };
+function expressionSourceIdentity(source: PetExpressionSourceItem): string {
+  return `${source.sourceKind}\u0000${source.sourceFileName}\u0000${String(source.runtimeName ?? "")}`;
+}
 
-  delete nextPet.expressions;
-  delete nextPet.expressionDescriptions;
-  delete nextPet.expressionSourceKinds;
-  delete nextPet.expressionSourceFiles;
-  delete nextPet.expressionSources;
-  delete nextPet.expressionEffects;
-  delete nextPet.eventSettings;
+/**
+ * Preserve only bindings that can be proved to target a source in the newly
+ * imported model.  Lines, subtitle preferences, and voice settings are not
+ * model resources and must survive a model replacement.
+ */
+function reconcileLive2DDependentConfig(
+  pet: PetDefinition,
+  importedSources: PetExpressionSourceItem[]
+): PetDefinition {
+  const sourcesByIdentity = new Map(importedSources.map((source) => [
+    expressionSourceIdentity(source), source
+  ]));
+  const retainedKeys = new Set<string>();
+  const expressions: NonNullable<PetDefinition["expressions"]> = {};
+  const expressionDescriptions: NonNullable<PetDefinition["expressionDescriptions"]> = {};
+  const expressionSourceKinds: NonNullable<PetDefinition["expressionSourceKinds"]> = {};
+  const expressionSourceFiles: NonNullable<PetDefinition["expressionSourceFiles"]> = {};
+  const expressionEffects: NonNullable<PetDefinition["expressionEffects"]> = {};
 
-  return nextPet;
+  for (const [key, runtimeName] of Object.entries(pet.expressions ?? {})) {
+    const sourceKind = pet.expressionSourceKinds?.[key] ?? "expression";
+    const sourceFileName = pet.expressionSourceFiles?.[key];
+    if (!sourceFileName) continue;
+    const source = sourcesByIdentity.get(expressionSourceIdentity({ sourceKind, sourceFileName, runtimeName }));
+    if (!source) continue;
+
+    retainedKeys.add(key);
+    expressions[key] = source.runtimeName === undefined || source.runtimeName === ""
+      ? source.sourceFileName
+      : source.runtimeName;
+    expressionSourceKinds[key] = source.sourceKind;
+    expressionSourceFiles[key] = source.sourceFileName;
+    if (pet.expressionDescriptions?.[key]) expressionDescriptions[key] = pet.expressionDescriptions[key];
+    if (pet.expressionEffects?.[key]) expressionEffects[key] = pet.expressionEffects[key];
+  }
+
+  const eventSettings = Object.fromEntries(Object.entries(pet.eventSettings ?? {}).map(([eventName, settings]) => {
+    if (!settings) return [eventName, {}];
+    const nextSettings = { ...settings };
+    if (settings.source && !sourcesByIdentity.has(expressionSourceIdentity(settings.source))) {
+      delete nextSettings.source;
+      delete nextSettings.sourceDurationMs;
+    }
+    if (!nextSettings.source && settings.expression && !retainedKeys.has(settings.expression)) {
+      delete nextSettings.expression;
+      delete nextSettings.expressionDurationMs;
+    }
+    return [eventName, nextSettings];
+  }));
+
+  const moodRanges = Object.fromEntries(Object.entries(pet.moodSettings?.ranges ?? {}).map(([rangeId, settings]) => {
+    if (!settings?.enterSource || sourcesByIdentity.has(expressionSourceIdentity(settings.enterSource))) {
+      return [rangeId, settings];
+    }
+    const { enterSource: _invalidSource, ...remaining } = settings;
+    return [rangeId, remaining];
+  }));
+
+  return {
+    ...pet,
+    expressions,
+    expressionDescriptions,
+    expressionSourceKinds,
+    expressionSourceFiles,
+    expressionEffects,
+    eventSettings: Object.keys(eventSettings).length ? eventSettings : undefined,
+    moodSettings: pet.moodSettings ? { ...pet.moodSettings, ranges: moodRanges } : undefined
+  };
 }
 
 function toPetExpressionSourceItems(sources: Live2DImportedSource[]): PetExpressionSourceItem[] {
@@ -1514,7 +1574,9 @@ export async function importLive2DModel(
       }
 
       const modelPath = toPetResourceUrl(resolvedModelEntryPath);
-      const basePet = replacingLive2DModel ? clearLive2DDependentConfig(pet) : pet;
+      const basePet = replacingLive2DModel
+        ? reconcileLive2DDependentConfig(pet, importedSources)
+        : pet;
       const nextPet: PetDefinition = {
         ...basePet,
         modelPath,

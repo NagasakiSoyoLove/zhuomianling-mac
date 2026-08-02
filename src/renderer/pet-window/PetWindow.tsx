@@ -31,7 +31,11 @@ import {
   readSearchParams
 } from "./petWindowState";
 import { RadialPetMenu } from "./RadialPetMenu";
-import { buildSpeechSettings, defaultEventSettings } from "./speechRuntime";
+import {
+  buildSpeechSettings,
+  defaultEventSettings,
+  shouldShowEventSubtitle
+} from "./speechRuntime";
 import { useAiStream } from "./useAiStream";
 import { useVoiceRecorder } from "./useVoiceRecorder";
 import { useVoiceReplyQueue } from "./useVoiceReplyQueue";
@@ -145,6 +149,7 @@ export function PetWindow(): JSX.Element {
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const chatDraftInputRef = useRef<HTMLTextAreaElement>(null);
   const clickThroughButtonInteractiveRef = useRef(false);
+  const clickThroughRef = useRef(fallbackState.clickThrough);
   const lastModelTouchHitAtRef = useRef(0);
   const rapidModelClickCountRef = useRef(0);
   const rapidModelClickWindowStartedAtRef = useRef(0);
@@ -213,13 +218,48 @@ export function PetWindow(): JSX.Element {
           clientY: point.windowY
         });
       }
+
+      if (!clickThroughRef.current) {
+        return;
+      }
+
+      const clickThroughButton = clickThroughButtonRef.current;
+
+      if (!clickThroughButton) {
+        return;
+      }
+
+      const bounds = clickThroughButton.getBoundingClientRect();
+      const isInsideClickThroughButton =
+        point.windowX >= bounds.left &&
+        point.windowX <= bounds.right &&
+        point.windowY >= bounds.top &&
+        point.windowY <= bounds.bottom;
+
+      if (isInsideClickThroughButton === clickThroughButtonInteractiveRef.current) {
+        return;
+      }
+
+      const petWindowApi = window.desktopPet?.petWindow;
+
+      if (!petWindowApi) {
+        return;
+      }
+
+      clickThroughButtonInteractiveRef.current = isInsideClickThroughButton;
+      void petWindowApi
+        .setClickThroughControlInteractive(isInsideClickThroughButton)
+        .catch(() => {
+          if (clickThroughButtonInteractiveRef.current === isInsideClickThroughButton) {
+            clickThroughButtonInteractiveRef.current = !isInsideClickThroughButton;
+          }
+        });
     });
   }, []);
   const idleTimerRef = useRef<number | undefined>();
   const clickThroughSpeechTimerRef = useRef<number | undefined>();
   const draftRef = useRef("");
   const chatOpenRef = useRef(false);
-  const clickThroughRef = useRef(fallbackState.clickThrough);
   const sendRecognizedVoiceTextRef = useRef<(text: string) => void>(() => undefined);
   const scheduleVoiceRestartRef = useRef<(isVoiceTriggered: boolean) => void>(() => undefined);
   const cancelAiStreamRef = useRef<(options?: { updateUi?: boolean }) => void>(() => undefined);
@@ -425,7 +465,11 @@ export function PetWindow(): JSX.Element {
     const pickedLine = pickLine(eventName);
     const text = pickedLine?.text?.trim() || fallbackText;
 
-    if (petDefinition?.capabilities.subtitles && !voiceReply.isSubtitleHeld()) {
+    if (
+      petDefinition?.capabilities.subtitles &&
+      shouldShowEventSubtitle(petDefinition, eventName) &&
+      !voiceReply.isSubtitleHeld()
+    ) {
       subtitle.show({
         text,
         mode: options?.mode ?? "typewriter",
@@ -750,40 +794,7 @@ export function PetWindow(): JSX.Element {
     if (!state.clickThrough) {
       clickThroughButtonInteractiveRef.current = false;
       void window.desktopPet?.petWindow.setClickThroughControlInteractive(false);
-      return;
     }
-
-    const handleMouseMove = (event: MouseEvent): void => {
-      const clickThroughButton = clickThroughButtonRef.current;
-
-      if (!clickThroughButton) {
-        return;
-      }
-
-      const bounds = clickThroughButton.getBoundingClientRect();
-      const isInsideClickThroughButton =
-        event.clientX >= bounds.left &&
-        event.clientX <= bounds.right &&
-        event.clientY >= bounds.top &&
-        event.clientY <= bounds.bottom;
-
-      if (isInsideClickThroughButton === clickThroughButtonInteractiveRef.current) {
-        return;
-      }
-
-      clickThroughButtonInteractiveRef.current = isInsideClickThroughButton;
-      void window.desktopPet?.petWindow.setClickThroughControlInteractive(
-        isInsideClickThroughButton
-      );
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      clickThroughButtonInteractiveRef.current = false;
-      void window.desktopPet?.petWindow.setClickThroughControlInteractive(false);
-    };
   }, [state.clickThrough]);
 
   const toggleClickThrough = async (): Promise<void> => {

@@ -40,7 +40,7 @@ if (forbiddenEntries.length || productionModuleEntries.length) {
 }
 
 console.log(
-  `Packed asset audit passed (${entries.length} entries, ${asarStat.size} bytes, no production node_modules).`
+  `Packed asset audit passed (${entries.length} entries, ${asarStat.size} bytes, only approved production modules).`
 );
 
 const memoryRuntimeRoot = path.join(

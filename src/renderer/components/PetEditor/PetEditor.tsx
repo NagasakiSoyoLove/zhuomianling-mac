@@ -15,6 +15,7 @@ import {
   MessagesSquare,
   KeyRound,
   Palette,
+  Archive,
   Volume2,
   XCircle
 } from "lucide-react";
@@ -65,6 +66,7 @@ import { QuickActionsPanel } from "./QuickActionsPanel";
 import { VoiceInputPanel } from "./VoiceInputPanel";
 import { MoodPanel } from "./MoodPanel";
 import { PresetVoicePanel } from "./PresetVoicePanel";
+import { PetPackageExportDialog } from "../PetPackage/PetPackageExportDialog";
 
 interface PetEditorProps {
   pets: PetDefinition[];
@@ -106,6 +108,7 @@ export function PetEditor({
   const [interactionExpanded, setInteractionExpanded] = useState(true);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [pendingPanel, setPendingPanel] = useState<PendingNavigation | undefined>();
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const selectedPet = useMemo(() => {
     return pets.find((pet) => pet.id === selectedPetId) ?? pets[0];
   }, [pets, selectedPetId]);
@@ -185,6 +188,14 @@ export function PetEditor({
     return null;
   }
 
+  const exportDisabledReason = selectedPet.id === "new-pet"
+    ? "请先保存桌宠"
+    : hasUnsavedChanges
+      ? "请先保存当前修改再导出"
+      : !selectedPet.modelPath
+        ? "请先导入 Live2D 模型"
+        : undefined;
+
   return (
     <section className="pageShell editorShell" aria-label="桌宠设置">
       <div className="pageHeader editorPageHeader">
@@ -216,7 +227,12 @@ export function PetEditor({
           </span>
         </div>
 
-        <div aria-hidden="true" />
+        <div className="editorHeaderActions">
+          <button className="editorExportButton" type="button" disabled={Boolean(exportDisabledReason)} title={exportDisabledReason} onClick={() => setExportDialogOpen(true)}>
+            <Archive size={16} />
+            导出桌宠
+          </button>
+        </div>
       </div>
 
       <div className="editorLayout">
@@ -377,6 +393,7 @@ export function PetEditor({
       {pendingPanel ? (
         <UnsavedChangesDialog onCancel={() => setPendingPanel(undefined)} onConfirm={confirmPanelChange} />
       ) : null}
+      {exportDialogOpen ? <PetPackageExportDialog pet={selectedPet} onClose={() => setExportDialogOpen(false)} /> : null}
     </section>
   );
 }

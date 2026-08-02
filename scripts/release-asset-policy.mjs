@@ -61,6 +61,29 @@ export function isForbiddenReleasePath(filePath) {
 
 export function isProductionNodeModulePath(filePath) {
   const normalizedPath = normalizeReleasePath(filePath);
+  const approvedPaths = new Set([
+    "/node_modules",
+    "/node_modules/buffer-crc32",
+    "/node_modules/buffer-crc32/license",
+    "/node_modules/buffer-crc32/dist",
+    "/node_modules/buffer-crc32/dist/index.cjs",
+    "/node_modules/buffer-crc32/dist/index.mjs",
+    "/node_modules/buffer-crc32/package.json",
+    "/node_modules/pend",
+    "/node_modules/pend/license",
+    "/node_modules/pend/index.js",
+    "/node_modules/pend/package.json",
+    "/node_modules/yauzl",
+    "/node_modules/yauzl/license",
+    "/node_modules/yauzl/crc32.js",
+    "/node_modules/yauzl/fd-slicer.js",
+    "/node_modules/yauzl/index.js",
+    "/node_modules/yauzl/package.json",
+    "/node_modules/yazl",
+    "/node_modules/yazl/license",
+    "/node_modules/yazl/index.js",
+    "/node_modules/yazl/package.json"
+  ]);
 
-  return normalizedPath === "/node_modules" || normalizedPath.startsWith("/node_modules/");
+  return normalizedPath.startsWith("/node_modules") && !approvedPaths.has(normalizedPath);
 }

@@ -24,6 +24,7 @@ function errorResponse(status: number): Response {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -57,6 +58,7 @@ describe("AI output capability probe", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(rejectedResponse())
+      .mockResolvedValueOnce(rejectedResponse())
       .mockResolvedValueOnce(streamResponse('{"reply":"probe-ok","moodDelta":0}'));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -72,12 +74,15 @@ describe("AI output capability probe", () => {
       streaming: true,
       confidence: "tested"
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).stream).toBe(false);
   });
 
   it("keeps the full protocol through prompt JSON when response_format is unsupported", async () => {
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(rejectedResponse())
+      .mockResolvedValueOnce(rejectedResponse())
       .mockResolvedValueOnce(rejectedResponse())
       .mockResolvedValueOnce(rejectedResponse())
       .mockResolvedValueOnce(streamResponse('{"reply":"probe-ok","moodDelta":0}'));
@@ -96,7 +101,7 @@ describe("AI output capability probe", () => {
       confidence: "tested",
       probeVersion: 2
     });
-    const body = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
+    const body = JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body));
     expect(body).not.toHaveProperty("response_format");
     expect(body.messages[0].content).toContain("reply 和 moodDelta");
   });
@@ -104,6 +109,9 @@ describe("AI output capability probe", () => {
   it("recognizes a non-streaming compatibility response", async () => {
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(rejectedResponse())
+      .mockResolvedValueOnce(rejectedResponse())
+      .mockResolvedValueOnce(rejectedResponse())
       .mockResolvedValueOnce(rejectedResponse())
       .mockResolvedValueOnce(rejectedResponse())
       .mockResolvedValueOnce(rejectedResponse())
@@ -135,6 +143,9 @@ describe("AI output capability probe", () => {
       .mockResolvedValueOnce(streamResponse('{"reply":"probe-ok"}'))
       .mockResolvedValueOnce(streamResponse('{"reply":"probe-ok"}'))
       .mockResolvedValueOnce(streamResponse('{"reply":"probe-ok"}'))
+      .mockResolvedValueOnce(streamResponse('{"reply":"probe-ok"}'))
+      .mockResolvedValueOnce(streamResponse('{"reply":"probe-ok"}'))
+      .mockResolvedValueOnce(streamResponse('{"reply":"probe-ok"}'))
       .mockResolvedValueOnce(streamResponse("probe-ok"));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -149,7 +160,7 @@ describe("AI output capability probe", () => {
       protocolTier: "text",
       confidence: "tested"
     });
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
   });
 
   it("does not mistake a JSON envelope for literal plain-text compatibility", async () => {
@@ -171,12 +182,9 @@ describe("AI output capability probe", () => {
     expect(fetchMock).toHaveBeenCalledTimes(8);
   });
 
-  it("retries without streaming when every streaming mode is rejected", async () => {
+  it("retries the same structured mode without streaming before changing protocol", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(rejectedResponse())
-      .mockResolvedValueOnce(rejectedResponse())
-      .mockResolvedValueOnce(rejectedResponse())
       .mockResolvedValueOnce(rejectedResponse())
       .mockResolvedValueOnce(
         new Response(
@@ -198,9 +206,94 @@ describe("AI output capability probe", () => {
       streaming: false,
       confidence: "tested"
     });
-    expect(fetchMock).toHaveBeenCalledTimes(5);
-    expect(JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body)).stream).toBe(true);
-    expect(JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body)).stream).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).stream).toBe(true);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).stream).toBe(false);
+  });
+
+  it("exhausts every structured transport before accepting plain text", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(rejectedResponse())
+      .mockResolvedValueOnce(rejectedResponse())
+      .mockResolvedValueOnce(rejectedResponse())
+      .mockResolvedValueOnce(rejectedResponse())
+      .mockResolvedValueOnce(rejectedResponse())
+      .mockResolvedValueOnce(rejectedResponse())
+      .mockResolvedValueOnce(streamResponse("probe-ok"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await probeAiOutputCapability({
+      baseUrl: "https://api.example.com/v1",
+      model: "model-a",
+      apiKey: "secret"
+    });
+
+    expect(result.capability).toMatchObject({
+      mode: "plain-text",
+      protocolTier: "text",
+      confidence: "tested"
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+    for (let index = 0; index < 6; index += 1) {
+      const body = JSON.parse(String(fetchMock.mock.calls[index]?.[1]?.body));
+      expect(body.messages[0].content).toContain("只返回 JSON");
+      expect(body.max_tokens).toBe(256);
+    }
+    const attempts = fetchMock.mock.calls.map((call) => {
+      const body = JSON.parse(String(call[1]?.body));
+      return {
+        responseFormat: body.response_format?.type ?? "prompt-only",
+        stream: body.stream
+      };
+    });
+    expect(attempts).toEqual([
+      { responseFormat: "json_schema", stream: true },
+      { responseFormat: "json_schema", stream: false },
+      { responseFormat: "json_object", stream: true },
+      { responseFormat: "json_object", stream: false },
+      { responseFormat: "prompt-only", stream: true },
+      { responseFormat: "prompt-only", stream: false },
+      { responseFormat: "prompt-only", stream: true }
+    ]);
+    const plainBody = JSON.parse(String(fetchMock.mock.calls[6]?.[1]?.body));
+    expect(plainBody.messages[0].content).toContain("只返回普通文字 probe-ok");
+    expect(plainBody.max_tokens).toBe(256);
+  });
+
+  it("continues with an independent timeout after one probe attempt stalls", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: '{"reply":"probe-ok","moodDelta":0}' } }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultPromise = probeAiOutputCapability({
+      baseUrl: "https://api.example.com/v1",
+      model: "model-a",
+      apiKey: "secret"
+    });
+    await vi.advanceTimersByTimeAsync(12_000);
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      tested: true,
+      capability: {
+        mode: "json-schema",
+        protocolTier: "full",
+        streaming: false
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("returns a bounded compatibility fallback when probing cannot connect", async () => {

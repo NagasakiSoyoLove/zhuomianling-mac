@@ -1,0 +1,179 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createHash } from "node:crypto";
+import fsSync from "node:fs";
+import { ZipFile } from "yazl";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+let userData = "";
+vi.mock("electron", () => ({ app: { getPath: () => userData, getVersion: () => "test" } }));
+vi.mock("../config/petConfigStore", () => ({
+  listLocalPets: vi.fn(async () => []), stopManagedGptSoVitsApi: vi.fn(),
+  testLocalPetVoiceModelConnection: vi.fn(), validateReferenceAudioDuration: vi.fn()
+}));
+vi.mock("../ai/aiSettings", () => ({
+  deleteAiConnection: vi.fn(), listAiModels: vi.fn(), saveAiConnection: vi.fn(), testAiOutputCapability: vi.fn()
+}));
+vi.mock("../config/live2dImportService", () => ({ validateLive2DFolder: vi.fn() }));
+
+import { beginPetPackageImport, cancelPetPackageImport, cleanupInterruptedPetPackageImports, commitPetPackageImport, listPetPackageImportAiModels, testPetPackageImportAi, testPetPackageImportVoice } from "./petPackageImportService";
+import { validateLive2DFolder } from "../config/live2dImportService";
+import { listAiModels, saveAiConnection, testAiOutputCapability } from "../ai/aiSettings";
+
+async function createValidPackage(filePath: string, options?: { disabledVoiceResources?: boolean; ai?: boolean }): Promise<void> {
+  const disabledVoiceResources = options?.disabledVoiceResources === true;
+  const portable = Buffer.from(`${JSON.stringify({
+    schemaVersion: 1, live2dEntry: "live2d/model.json", name: "Imported", description: "ok", personaPrompt: "",
+    avatar: "assets/avatar.png",
+    capabilities: { chat: false, voiceOutput: false, subtitles: true }, details: { role: "", personality: "", scenes: [], features: [] }, uiSettings: { theme: "soft" },
+    ...(disabledVoiceResources ? { voiceModelSettings: {
+      enabled: false, connected: false, modelVersion: "v2ProPlus", referenceText: "测试",
+      referenceLanguage: "zh", language: "zh", playMode: "sentence",
+      sovitsModel: "voice/models/sovits/voice.pth", gptModel: "voice/models/gpt/voice.ckpt", referenceAudio: "voice/reference/reference.wav"
+    } } : {})
+  }, null, 2)}\n`);
+  const model = Buffer.from(JSON.stringify({ model: "model.moc" }));
+  const moc = Buffer.from("moc");
+  const data = new Map([["pet.json", portable], ["assets/avatar.png", Buffer.from("avatar-image")], ["live2d/model.json", model], ["live2d/model.moc", moc]]);
+  if (disabledVoiceResources) {
+    data.set("voice/models/sovits/voice.pth", Buffer.from("sovits"));
+    data.set("voice/models/gpt/voice.ckpt", Buffer.from("gpt"));
+    data.set("voice/reference/reference.wav", Buffer.from("RIFF0000WAVE"));
+  }
+  const manifest = {
+    kind: "zhuomianling-pet-package", formatVersion: 1, exportedAt: new Date().toISOString(), appVersion: "test",
+    pet: { originalPetId: "imported", name: "Imported" }, requirements: { ai: options?.ai === true, gptSoVits: disabledVoiceResources },
+    entries: [...data].map(([entryPath, bytes]) => ({ path: entryPath, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") }))
+  };
+  const zip = new ZipFile();
+  const output = fsSync.createWriteStream(filePath);
+  const done = new Promise<void>((resolve, reject) => { output.on("close", resolve); output.on("error", reject); });
+  zip.outputStream.pipe(output);
+  zip.addBuffer(Buffer.from(JSON.stringify(manifest)), "manifest.json");
+  for (const [entryPath, bytes] of data) zip.addBuffer(bytes, entryPath);
+  zip.end();
+  await done;
+}
+
+describe("pet package import staging safety", () => {
+  beforeEach(async () => { userData = await fs.mkdtemp(path.join(os.tmpdir(), "zmling-import-")); });
+  afterEach(async () => { await fs.rm(userData, { recursive: true, force: true }); });
+
+  it("rejects non-ZIP input without leaving a staging pet", async () => {
+    const input = path.join(userData, "bad.zmling");
+    await fs.writeFile(input, "not a zip");
+    const result = await beginPetPackageImport(input, 1);
+    expect(result.ok).toBe(false);
+    const petsRoot = path.join(userData, "pets");
+    const entries = await fs.readdir(petsRoot).catch(() => []);
+    expect(entries.filter((name) => name.startsWith(".importing-"))).toEqual([]);
+  });
+
+  it("only cleans strict staging names with a matching marker", async () => {
+    const petsRoot = path.join(userData, "pets");
+    const safeId = "11111111-1111-4111-8111-111111111111";
+    const safe = path.join(petsRoot, `.importing-${safeId}`);
+    const unknownId = "22222222-2222-4222-8222-222222222222";
+    const unknown = path.join(petsRoot, `.importing-${unknownId}`);
+    await fs.mkdir(safe, { recursive: true }); await fs.mkdir(unknown, { recursive: true });
+    await fs.writeFile(path.join(safe, ".zmling-import.json"), JSON.stringify({ kind: "zmling-import-staging", sessionId: safeId }));
+    await fs.writeFile(path.join(unknown, ".zmling-import.json"), JSON.stringify({ kind: "unknown", sessionId: unknownId }));
+    await cleanupInterruptedPetPackageImports();
+    await expect(fs.access(safe)).rejects.toThrow();
+    await expect(fs.access(unknown)).resolves.toBeUndefined();
+  });
+
+  it("extracts, verifies, and atomically commits a valid package under the final id", async () => {
+    vi.mocked(validateLive2DFolder).mockResolvedValue({ ok: true, message: "ok", entryRelativePath: "model.json", checks: [], missingFiles: [], textureCount: 0, motionCount: 0, expressionCount: 0 });
+    const input = path.join(userData, "valid.zmling");
+    await createValidPackage(input);
+    const begun = await beginPetPackageImport(input, 7);
+    expect(begun.ok, begun.message).toBe(true);
+    expect(begun).toMatchObject({ ok: true, sessionId: expect.any(String), petName: "Imported" });
+    expect(begun.avatarDataUrl).toMatch(/^data:image\/png;base64,/);
+    const committed = await commitPetPackageImport(begun.sessionId!, 7);
+    expect(committed.ok).toBe(true);
+    expect(committed.pet?.id).toBe("imported");
+    expect(committed.pet?.modelPath).toBe("pet-resource://local/imported/live2d/model.json");
+    expect(committed.pet?.avatarImage).toBe("pet-resource://local/imported/assets/avatar.png");
+    const stored = JSON.parse(await fs.readFile(path.join(userData, "pets", "imported", "pet.local.json"), "utf8"));
+    expect(stored.modelPath).toBe("pet-resource://local/imported/live2d/model.json");
+    expect(stored.avatarImage).toBe("pet-resource://local/imported/assets/avatar.png");
+    await expect(fs.access(path.join(userData, "pets", "imported", "pet.json"))).rejects.toThrow();
+  });
+
+  it("accepts packaged voice resources even when voice output is disabled and disconnected", async () => {
+    vi.mocked(validateLive2DFolder).mockResolvedValue({ ok: true, message: "ok", entryRelativePath: "model.json", checks: [], missingFiles: [], textureCount: 0, motionCount: 0, expressionCount: 0 });
+    const input = path.join(userData, "disabled-voice.zmling");
+    await createValidPackage(input, { disabledVoiceResources: true });
+    const begun = await beginPetPackageImport(input, 9);
+    expect(begun.ok, begun.message).toBe(true);
+    expect(begun.requirements?.gptSoVits).toBe(true);
+    await cancelPetPackageImport(begun.sessionId, 9);
+  });
+
+  it("rejects an arbitrary folder selected as the GPT-SoVITS root", async () => {
+    vi.mocked(validateLive2DFolder).mockResolvedValue({ ok: true, message: "ok", entryRelativePath: "model.json", checks: [], missingFiles: [], textureCount: 0, motionCount: 0, expressionCount: 0 });
+    const input = path.join(userData, "voice-root-check.zmling");
+    await createValidPackage(input, { disabledVoiceResources: true });
+    const begun = await beginPetPackageImport(input, 10);
+    expect(begun.ok, begun.message).toBe(true);
+    const arbitraryFolder = path.join(userData, "not-gpt-sovits");
+    await fs.mkdir(arbitraryFolder);
+
+    const checked = await testPetPackageImportVoice(begun.sessionId!, arbitraryFolder, 10);
+
+    expect(checked).toMatchObject({ ok: false, message: expect.stringContaining("不是完整的 GPT-SoVITS 文件夹") });
+    await cancelPetPackageImport(begun.sessionId, 10);
+  });
+
+  it("lists import-session models with a main-process-derived provider name", async () => {
+    vi.mocked(validateLive2DFolder).mockResolvedValue({ ok: true, message: "ok", entryRelativePath: "model.json", checks: [], missingFiles: [], textureCount: 0, motionCount: 0, expressionCount: 0 });
+    vi.mocked(listAiModels).mockResolvedValue({ ok: true, message: "ok", checkedAt: new Date().toISOString(), models: [{ id: "deepseek-chat", name: "DeepSeek Chat" }] });
+    const input = path.join(userData, "ai.zmling");
+    await createValidPackage(input, { ai: true });
+    const begun = await beginPetPackageImport(input, 11);
+    expect(begun.ok, begun.message).toBe(true);
+    const listed = await listPetPackageImportAiModels({ sessionId: begun.sessionId!, baseUrl: "https://api.deepseek.com/v1", apiKey: "secret" }, 11);
+    expect(listed).toMatchObject({ ok: true, providerName: "DeepSeek", models: [{ id: "deepseek-chat" }] });
+    expect(vi.mocked(listAiModels)).toHaveBeenCalledWith(expect.objectContaining({ providerName: "DeepSeek", model: "" }), expect.any(AbortSignal));
+    await cancelPetPackageImport(begun.sessionId, 11);
+  });
+
+  it("commits AI settings with the capability already tested by the import session", async () => {
+    vi.mocked(validateLive2DFolder).mockResolvedValue({ ok: true, message: "ok", entryRelativePath: "model.json", checks: [], missingFiles: [], textureCount: 0, motionCount: 0, expressionCount: 0 });
+    const checkedAt = "2026-07-28T00:00:00.000Z";
+    vi.mocked(listAiModels).mockResolvedValue({ ok: true, message: "ok", checkedAt, models: [{ id: "model-a", name: "Model A" }] });
+    vi.mocked(testAiOutputCapability).mockResolvedValue({
+      ok: true,
+      message: "ok",
+      checkedAt,
+      capability: { baseUrl: "https://api.example.com/v1", model: "model-a", mode: "json-schema", protocolTier: "full", streaming: true, confidence: "tested", checkedAt, probeVersion: 2 }
+    });
+    vi.mocked(saveAiConnection).mockResolvedValue({
+      config: { petId: "imported", providerName: "OpenAI Compatible", baseUrl: "https://api.example.com/v1", model: "model-a", models: [{ id: "model-a", name: "Model A" }], hasApiKey: true },
+      test: { ok: true, message: "saved", checkedAt }
+    });
+    const input = path.join(userData, "ai-commit.zmling");
+    await createValidPackage(input, { ai: true });
+    const begun = await beginPetPackageImport(input, 12);
+    expect(begun.ok, begun.message).toBe(true);
+    const tested = await testPetPackageImportAi({
+      sessionId: begun.sessionId!,
+      draft: { baseUrl: "https://api.example.com/v1", apiKey: "secret", model: "model-a" }
+    }, 12);
+    expect(tested.ok).toBe(true);
+
+    const committed = await commitPetPackageImport(begun.sessionId!, 12);
+
+    expect(committed.ok, committed.message).toBe(true);
+    expect(vi.mocked(saveAiConnection)).toHaveBeenCalledWith(
+      expect.objectContaining({ petId: "imported", model: "model-a" }),
+      expect.objectContaining({
+        models: [{ id: "model-a", name: "Model A" }],
+        outputCapability: expect.objectContaining({ mode: "json-schema", confidence: "tested" })
+      })
+    );
+  });
+});

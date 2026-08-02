@@ -65,6 +65,26 @@ export async function validateGptSoVitsRoot(rootPath: string | undefined): Promi
       throw new VoiceResourceValidationError("GPT-SoVITS 本地路径不是文件夹，请重新选择。");
     }
     await fs.access(normalized, fsSync.constants.R_OK);
+
+    const requiredEntries = [
+      { relativePath: path.join("runtime", "python.exe"), kind: "file" as const },
+      { relativePath: "api_v2.py", kind: "file" as const },
+      { relativePath: path.join("GPT_SoVITS", "pretrained_models", "chinese-roberta-wwm-ext-large"), kind: "directory" as const },
+      { relativePath: path.join("GPT_SoVITS", "pretrained_models", "chinese-hubert-base"), kind: "directory" as const }
+    ];
+    for (const required of requiredEntries) {
+      const target = path.join(normalized, required.relativePath);
+      let targetStat: fsSync.Stats;
+      try {
+        targetStat = await fs.stat(target);
+        await fs.access(target, fsSync.constants.R_OK);
+      } catch {
+        throw new VoiceResourceValidationError(`所选目录不是完整的 GPT-SoVITS 文件夹，缺少：${required.relativePath}。`);
+      }
+      if (required.kind === "file" ? !targetStat.isFile() : !targetStat.isDirectory()) {
+        throw new VoiceResourceValidationError(`所选目录中的 ${required.relativePath} 类型不正确。`);
+      }
+    }
   } catch (error) {
     if (error instanceof VoiceResourceValidationError) throw error;
     throw new VoiceResourceValidationError(

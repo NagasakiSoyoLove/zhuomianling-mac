@@ -1,3 +1,11 @@
+export const aiProviderOptions = [
+  { id: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com" },
+  { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com" },
+  { id: "gemini", name: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai" }
+] as const;
+
+export type AiProviderSelectId = (typeof aiProviderOptions)[number]["id"] | "custom";
+
 export function normalizeAiBaseUrl(baseUrl: string): string {
   const trimmedBaseUrl = baseUrl.trim();
 
@@ -29,6 +37,27 @@ export interface AiConnectionDraft {
   model: string;
   apiKey: string;
   models?: AiModelOption[];
+}
+
+export function findAiProviderByBaseUrl(baseUrl: string): (typeof aiProviderOptions)[number] | undefined {
+  const normalizedBaseUrl = normalizeAiBaseUrl(baseUrl);
+  return aiProviderOptions.find((provider) => normalizeAiBaseUrl(provider.baseUrl) === normalizedBaseUrl);
+}
+
+export function getOpenAiCompatibleProviderName(baseUrl: string): string {
+  const configuredProvider = findAiProviderByBaseUrl(baseUrl);
+  if (configuredProvider) return configuredProvider.name;
+  try {
+    const hostname = new URL(normalizeAiBaseUrl(baseUrl)).hostname.toLowerCase();
+    if (hostname === "api.openai.com") return "OpenAI";
+    if (hostname === "api.deepseek.com") return "DeepSeek";
+    if (hostname === "generativelanguage.googleapis.com") return "Gemini";
+    if (hostname === "api.x.ai") return "xAI";
+    if (hostname === "openrouter.ai") return "OpenRouter";
+  } catch {
+    // Invalid drafts remain editable and use the protocol-level fallback label.
+  }
+  return "OpenAI Compatible";
 }
 
 export type AiOutputMode = "json-schema" | "json-object" | "prompt-json" | "plain-text";

@@ -1,0 +1,238 @@
+.packageImportIntro {
+  align-content: start;
+}
+
+.packageInspectionNotice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  border: 1px solid rgba(38, 132, 255, 0.16);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(232, 242, 255, 0.72);
+  color: #344255;
+}
+
+.packageInspectionNotice > svg {
+  margin-top: 2px;
+  color: #1766c2;
+}
+
+.packageInspectionNotice strong {
+  color: #233044;
+  font-size: 13px;
+}
+
+.packageInspectionNotice ul {
+  margin-top: 6px;
+}
+
+/* The shared privacy-note style uses flex for icon notices. This notice has
+ * inline text, so normal text flow keeps its sentence wrapping together. */
+.packageImportIntro .packagePrivacyNote {
+  display: block;
+  line-height: 1.6;
+}
+
+.packageImportIntro .packagePrivacyNote strong {
+  white-space: nowrap;
+}
+
+.packageDetectedProvider {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 10px;
+  padding: 8px 11px;
+  background: rgba(232, 242, 255, 0.72);
+  color: #607080;
+  font-size: 12px;
+}
+
+.packageDetectedProvider strong {
+  color: #1766c2;
+  font-size: 13px;
+}
+
+.packageModelCount {
+  color: #24783b;
+  font-weight: 700;
+}
+
+.packageChoiceField {
+  display: grid;
+  gap: 6px;
+  color: #344255;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.packageChoice {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+
+.packageChoiceButton,
+.packageChoiceInputWrap {
+  display: grid;
+  width: 100%;
+  min-height: 42px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  border: 1px solid rgba(30, 41, 59, 0.11);
+  border-radius: 12px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.68)), rgba(255, 255, 255, 0.74);
+  color: var(--ui-ink, #233044);
+  outline: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.84), 0 8px 18px rgba(28, 39, 54, 0.04);
+}
+
+.packageChoiceButton {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 760;
+  text-align: left;
+}
+
+.packageChoiceButton > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.packageChoiceButton .placeholder {
+  color: #9aa7b4;
+}
+
+.packageChoiceButton:hover:not(:disabled),
+.packageChoiceInputWrap:hover {
+  border-color: rgba(0, 122, 255, 0.24);
+}
+
+.packageChoiceButton:focus-visible,
+.packageChoice.open .packageChoiceButton,
+.packageChoiceInputWrap:focus-within {
+  border-color: rgba(0, 122, 255, 0.44);
+  box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.84);
+}
+
+.packageChoiceButton:disabled,
+.packageChoiceInputWrap:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.packageChoiceButton svg,
+.packageChoiceChevron {
+  color: var(--ui-soft, #607080);
+  transition: transform 0.16s ease;
+}
+
+.packageChoice.open .packageChoiceButton > svg,
+.packageChoice.open .packageChoiceChevron {
+  transform: rotate(180deg);
+}
+
+.packageChoiceInputWrap {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.packageChoiceInputWrap > svg:first-child {
+  color: #7a8998;
+}
+
+.packageChoiceInputWrap input {
+  min-height: 40px !important;
+  width: 100%;
+  border: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  color: #233044;
+  font-size: 13px;
+  font-weight: 760;
+  box-shadow: none !important;
+  outline: none;
+}
+
+.packageChoiceMenu {
+  z-index: 1400;
+  display: grid;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 14px;
+  padding: 6px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(245, 249, 255, 0.82)), rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(30px) saturate(180%) contrast(1.03);
+  -webkit-backdrop-filter: blur(30px) saturate(180%) contrast(1.03);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 22px 48px rgba(28, 39, 54, 0.2);
+  scrollbar-color: rgba(76, 92, 112, 0.38) transparent;
+  scrollbar-width: thin;
+}
+
+.packageChoiceOption {
+  display: grid;
+  width: 100%;
+  min-height: 38px;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 10px;
+  padding: 0 10px;
+  background: transparent;
+  color: #2f3c4d;
+  font-size: 13px;
+  font-weight: 760;
+  text-align: left;
+}
+
+.packageChoiceOption span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.packageChoiceOption:hover,
+.packageChoiceOption.active {
+  background: rgba(0, 122, 255, 0.1);
+  color: var(--ui-accent-ink, #1766c2);
+}
+
+.packageChoiceOption.selected {
+  background: rgba(0, 122, 255, 0.14);
+  color: var(--ui-accent-ink, #1766c2);
+}
+
+.packageChoiceOption svg {
+  justify-self: end;
+}
+
+.packageChoiceEmpty {
+  padding: 18px 12px;
+  color: #7a8998;
+  font-size: 13px;
+  text-align: center;
+}
+
+.petPackageBody input:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.petPackageDialog footer .primaryAction {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}

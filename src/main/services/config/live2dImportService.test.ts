@@ -89,7 +89,7 @@ async function writePetConfig(petId = "pet-a"): Promise<void> {
 async function writeModel(
   directoryPath: string,
   identity: string,
-  options: { mocReference?: string; writeMoc?: boolean } = {}
+  options: { mocReference?: string; writeMoc?: boolean; motionFileName?: string } = {}
 ): Promise<void> {
   const mocReference = options.mocReference ?? "model.moc3";
   await fs.mkdir(directoryPath, { recursive: true });
@@ -99,7 +99,8 @@ async function writeModel(
       Version: 3,
       FileReferences: {
         Moc: mocReference,
-        Textures: []
+        Textures: [],
+        ...(options.motionFileName ? { Motions: { Tap: [{ File: options.motionFileName }] } } : {})
       }
     }),
     "utf8"
@@ -110,6 +111,9 @@ async function writeModel(
     const mocPath = path.resolve(directoryPath, mocReference);
     await fs.mkdir(path.dirname(mocPath), { recursive: true });
     await fs.writeFile(mocPath, `moc-${identity}`, "utf8");
+  }
+  if (options.motionFileName) {
+    await fs.writeFile(path.join(directoryPath, options.motionFileName), "{}", "utf8");
   }
 }
 
@@ -228,12 +232,52 @@ describe("atomic Live2D model replacement", () => {
     expect(storedPet.personaSettings).toEqual({ speakingStyle: "keep persona settings" });
     expect(storedPet.defaultVoice).toBe("keep-default-voice");
     expect(storedPet.voiceModelSettings).toMatchObject({ enabled: false, connected: false });
-    expect(storedPet).not.toHaveProperty("expressions");
+    expect(storedPet.expressions).toEqual({});
     expect(storedPet.lines).toEqual({ click: ["old line"] });
     expect(await fs.readFile(path.join(unrelatedDirectory, "keep.txt"), "utf8")).toBe("keep");
     expect(await listPetDirectoryNames()).not.toEqual(
       expect.arrayContaining([expect.stringMatching(/^\.live2d-(?:staging|backup)-[0-9a-f-]{36}$/)])
     );
+  });
+
+  it("retains only bindings whose exact source identity exists in the replacement", async () => {
+    const sourceDirectory = path.join(temporaryDirectory, "source-preserved-binding");
+    await writeModel(sourceDirectory, "new", { motionFileName: "tap.motion3.json" });
+    const configPath = path.join(getPetDirectory(), "pet.local.json");
+    const config = JSON.parse(await fs.readFile(configPath, "utf8")) as Record<string, unknown>;
+    Object.assign(config, {
+      expressions: { tap: "Tap", removed: "Idle" },
+      expressionDescriptions: { tap: "保留", removed: "移除" },
+      expressionSourceKinds: { tap: "motion", removed: "motion" },
+      expressionSourceFiles: { tap: "tap.motion3.json", removed: "old.motion3.json" },
+      expressionSources: [
+        { sourceKind: "motion", sourceFileName: "tap.motion3.json", runtimeName: "Tap" },
+        { sourceKind: "motion", sourceFileName: "old.motion3.json", runtimeName: "Idle" }
+      ],
+      expressionEffects: { tap: { parameters: [{ id: "ParamAngleX", value: 1 }] } },
+      eventSettings: {
+        click: { source: { sourceKind: "motion", sourceFileName: "tap.motion3.json", runtimeName: "Tap" }, showSubtitle: false },
+        idle: { source: { sourceKind: "motion", sourceFileName: "old.motion3.json", runtimeName: "Idle" }, showSubtitle: false }
+      },
+      moodSettings: {
+        ranges: {
+          calm: { enterSource: { sourceKind: "motion", sourceFileName: "tap.motion3.json", runtimeName: "Tap" }, enterLine: "保留" },
+          downcast: { enterSource: { sourceKind: "motion", sourceFileName: "old.motion3.json", runtimeName: "Idle" }, enterLine: "同样保留" }
+        }
+      }
+    });
+    await fs.writeFile(configPath, JSON.stringify(config), "utf8");
+    const { importLive2DModel } = await import("./live2dImportService");
+
+    const result = await importLive2DModel({ petId: "pet-a", sourceFolderPath: sourceDirectory });
+
+    expect(result.ok).toBe(true);
+    expect(result.pet?.expressions).toEqual({ tap: "Tap" });
+    expect(result.pet?.expressionEffects).toEqual({ tap: { parameters: [{ id: "ParamAngleX", value: 1 }] } });
+    expect(result.pet?.eventSettings?.click).toMatchObject({ showSubtitle: false, source: { sourceFileName: "tap.motion3.json" } });
+    expect(result.pet?.eventSettings?.idle).toEqual({ showSubtitle: false });
+    expect(result.pet?.moodSettings?.ranges?.calm?.enterSource?.sourceFileName).toBe("tap.motion3.json");
+    expect(result.pet?.moodSettings?.ranges?.downcast).toEqual({ enterLine: "同样保留" });
   });
 
   it("rolls back the directory and configuration when the atomic config commit fails", async () => {

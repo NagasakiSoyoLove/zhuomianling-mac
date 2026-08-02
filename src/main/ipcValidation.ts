@@ -106,6 +106,16 @@ export const validatedIpcChannels = new Set([
   "ai-settings:list-models",
   "ai-settings:test-output",
   "ai-settings:save",
+  "pet-package:inspect-export",
+  "pet-package:export",
+  "pet-package:begin-import",
+  "pet-package:list-import-ai-models",
+  "pet-package:test-import-ai",
+  "pet-package:pick-gpt-sovits-root",
+  "pet-package:test-import-voice",
+  "pet-package:commit-import",
+  "pet-package:cancel-import",
+  "pet-package:cancel-operation",
   "memory:get-summary",
   "memory:list",
   "memory:get",
@@ -616,6 +626,8 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
     "pet-config:disconnect-voice-model",
     "live2d-import:select-folder",
     "ai-settings:list",
+    "pet-package:begin-import",
+    "pet-package:pick-gpt-sovits-root",
     "window:minimize",
     "window:close",
     "pet-window:toggle-click-through",
@@ -745,12 +757,88 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
     return;
   }
 
-  if (
-    channel === "pet-config:save-event-settings" ||
-    channel === "pet-config:save-voice-input"
-  ) {
+  if (channel === "pet-config:save-event-settings") {
+    expectArgumentCount(channel, args, 1);
+    const draft = assertRecord(channel, args[0]);
+    if (!Array.isArray(draft.events) || draft.events.length > 128) {
+      fail(channel, "events 数量无效。");
+    }
+    for (const rawEvent of draft.events) {
+      const event = assertRecord(channel, rawEvent, "event");
+      if (event.showSubtitle !== undefined && typeof event.showSubtitle !== "boolean") {
+        fail(channel, "event.showSubtitle 必须是布尔值。");
+      }
+    }
+    validatePetDraft(channel, draft);
+    return;
+  }
+
+  if (channel === "pet-config:save-voice-input") {
     expectArgumentCount(channel, args, 1);
     validatePetDraft(channel, args[0]);
+    return;
+  }
+
+  if (channel === "pet-package:inspect-export" || channel === "pet-package:export") {
+    expectArgumentCount(channel, args, 1);
+    assertPetId(channel, args[0]);
+    return;
+  }
+
+  if (channel === "pet-package:list-import-ai-models") {
+    expectArgumentCount(channel, args, 1);
+    const request = assertRecord(channel, args[0]);
+    assertAllowedKeys(channel, request, ["sessionId", "baseUrl", "apiKey"]);
+    assertString(channel, request.sessionId, "sessionId", 64);
+    assertString(channel, request.baseUrl, "baseUrl", 4096);
+    assertString(channel, request.apiKey, "apiKey", 16_384);
+    assertSafePayload(channel, request, { maxStringLength: 16_384, maxTotalStringLength: 32_768 });
+    return;
+  }
+
+  if (channel === "pet-package:test-import-ai") {
+    expectArgumentCount(channel, args, 1);
+    const request = assertRecord(channel, args[0]);
+    assertAllowedKeys(channel, request, ["sessionId", "draft"]);
+    assertString(channel, request.sessionId, "sessionId", 64);
+    const draft = assertRecord(channel, request.draft, "draft");
+    assertAllowedKeys(channel, draft, ["baseUrl", "model", "apiKey"]);
+    assertString(channel, draft.baseUrl, "baseUrl", 4096);
+    assertString(channel, draft.model, "model", 512);
+    assertString(channel, draft.apiKey, "apiKey", 16_384);
+    assertSafePayload(channel, request, { maxStringLength: 16_384, maxTotalStringLength: 262_144 });
+    return;
+  }
+
+  if (channel === "pet-package:test-import-voice") {
+    expectArgumentCount(channel, args, 1);
+    const request = assertRecord(channel, args[0]);
+    assertAllowedKeys(channel, request, ["sessionId", "gptSoVitsRootPath"]);
+    assertString(channel, request.sessionId, "sessionId", 64);
+    assertString(channel, request.gptSoVitsRootPath, "gptSoVitsRootPath", 32_768);
+    return;
+  }
+
+  if (channel === "pet-package:commit-import") {
+    expectArgumentCount(channel, args, 1);
+    const request = assertRecord(channel, args[0]);
+    assertAllowedKeys(channel, request, ["sessionId"]);
+    assertString(channel, request.sessionId, "sessionId", 64);
+    return;
+  }
+
+  if (channel === "pet-package:cancel-import") {
+    expectArgumentCount(channel, args, 1);
+    const request = assertRecord(channel, args[0]);
+    assertAllowedKeys(channel, request, ["sessionId", "operationId"]);
+    assertOptionalString(channel, request.sessionId, "sessionId", 64);
+    assertOptionalString(channel, request.operationId, "operationId", 64);
+    return;
+  }
+
+  if (channel === "pet-package:cancel-operation") {
+    expectArgumentCount(channel, args, 1);
+    assertString(channel, args[0], "operationId", 64);
     return;
   }
 

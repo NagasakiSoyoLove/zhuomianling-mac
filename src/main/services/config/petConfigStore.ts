@@ -1976,21 +1976,9 @@ export async function saveLocalPetExpressionMappings(
   const expressionSourceKinds: PetDefinition["expressionSourceKinds"] = {};
   const expressionSourceFiles: PetDefinition["expressionSourceFiles"] = {};
   const expressionEffects: NonNullable<PetDefinition["expressionEffects"]> = {};
-  const expressionSources = (draft.sources ?? [])
-    .map((source) => {
-      const sourceFileName = source.sourceFileName.trim();
-      const runtimeName =
-        typeof source.runtimeName === "number" ? source.runtimeName : source.runtimeName?.trim();
-
-      return sourceFileName
-        ? {
-            sourceFileName,
-            runtimeName,
-            sourceKind: source.sourceKind
-          }
-        : undefined;
-    })
-    .filter((source): source is NonNullable<typeof source> => Boolean(source));
+  const importedSources = pet.expressionSources ?? [];
+  const importedSourceIds = new Set(importedSources.map((source) =>
+    `${source.sourceKind}\u0000${source.sourceFileName}\u0000${String(source.runtimeName ?? "")}`));
   const mappingKeyCounts = new Map<string, number>();
 
   for (const item of draft.mappings) {
@@ -2029,6 +2017,14 @@ export async function saveLocalPetExpressionMappings(
       continue;
     }
 
+    const sourceId = `${item.sourceKind}\u0000${sourceFileName}\u0000${String(runtimeName ?? "")}`;
+    if (!importedSourceIds.has(sourceId)) {
+      return {
+        ok: false,
+        message: `表现源「${sourceFileName}」不属于当前已导入的 Live2D 模型，请刷新后重试。`
+      };
+    }
+
     expressions[key] = runtimeName === undefined || runtimeName === "" ? sourceFileName : runtimeName;
     expressionSourceKinds[key] = item.sourceKind;
     expressionSourceFiles[key] = sourceFileName;
@@ -2050,7 +2046,9 @@ export async function saveLocalPetExpressionMappings(
     expressionSourceKinds,
     expressionSourceFiles,
     expressionEffects,
-    expressionSources: expressionSources.length ? expressionSources : pet.expressionSources,
+    // The import scanner owns this catalog. Mapping saves may reference it but
+    // must never replace it with renderer-provided values.
+    expressionSources: importedSources,
     isLocal: true
   };
 
@@ -2150,7 +2148,8 @@ export async function saveLocalPetEventSettings(
     const source = normalizeExpressionSource(item.source);
     const expression = item.expression?.trim();
     const hasMappedExpression = Boolean(expression && mappedExpressionKeys.has(expression));
-    const hasEventOverride = Boolean(source) || hasMappedExpression || nextLines.length > 0;
+    const hasEventOverride =
+      Boolean(source) || hasMappedExpression || nextLines.length > 0 || item.showSubtitle === false;
     const previousEventSettings = eventSettings[eventName] ?? {};
     const preservedEventSettings = { ...previousEventSettings };
 
@@ -2159,6 +2158,7 @@ export async function saveLocalPetEventSettings(
     delete preservedEventSettings.source;
     delete preservedEventSettings.sourceDurationMs;
     delete preservedEventSettings.subtitleHoldMs;
+    delete preservedEventSettings.showSubtitle;
 
     delete lines[eventName];
 
@@ -2177,6 +2177,7 @@ export async function saveLocalPetEventSettings(
 
     eventSettings[eventName] = {
       ...preservedEventSettings,
+      ...(item.showSubtitle === false ? { showSubtitle: false } : {}),
       ...(source
         ? {
             source,

@@ -122,6 +122,7 @@ export function createEventSettingsDraft(pet: PetDefinition): LocalPetEventSetti
           savedSettings?.sourceDurationMs ??
           savedSettings?.expressionDurationMs ??
           event.expressionDurationMs,
+        showSubtitle: savedSettings?.showSubtitle !== false,
         lines: pet.lines?.[event.id] ?? []
       };
     })

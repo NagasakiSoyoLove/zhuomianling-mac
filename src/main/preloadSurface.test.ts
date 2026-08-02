@@ -11,6 +11,9 @@ describe("preload capability separation", () => {
     expect(source).toContain('ipcRenderer.invoke("memory:get-source-conversation"');
     expect(source).toContain('ipcRenderer.invoke("memory:clear"');
     expect(source).toContain('ipcRenderer.invoke("ai-settings:test-output"');
+    expect(source).toContain('ipcRenderer.invoke("pet-package:begin-import"');
+    expect(source).toContain('ipcRenderer.invoke("pet-package:list-import-ai-models"');
+    expect(source).toContain('ipcRenderer.invoke("pet-package:export"');
     for (const forbiddenChannel of [
       "ai-chat:stream",
       "ai-chat:cancel",
@@ -33,6 +36,7 @@ describe("preload capability separation", () => {
       "live2d-import:",
       "ai-settings:",
       "memory:",
+      "pet-package:",
       "pet-window:show"
     ]) {
       expect(source).not.toContain(forbiddenChannel);

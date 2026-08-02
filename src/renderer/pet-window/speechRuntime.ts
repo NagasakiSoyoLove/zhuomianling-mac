@@ -1,5 +1,7 @@
 import type {
+  PetDefinition,
   PetEventSettings,
+  PetLineEvent,
   PetVoiceInputSettings,
   PetVoiceModelSettings
 } from "../../shared/types/pet";
@@ -61,6 +63,13 @@ export const defaultEventSettings: Record<
     expressionDurationMs: 1800
   }
 };
+
+export function shouldShowEventSubtitle(
+  petDefinition: PetDefinition | undefined,
+  eventName: PetLineEvent
+): boolean {
+  return petDefinition?.eventSettings?.[eventName]?.showSubtitle !== false;
+}
 
 export function buildSpeechSettings(
   voiceInputSettings?: PetVoiceInputSettings,

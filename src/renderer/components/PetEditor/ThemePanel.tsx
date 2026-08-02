@@ -1,4 +1,4 @@
-import { AlertTriangle, FileJson, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileJson, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { createPortal } from "react-dom";
@@ -70,23 +70,26 @@ function isSameTheme(
 }
 
 function ThemeImportDialog({
-  importing,
   result,
   onImport,
   onClose
 }: {
-  importing: boolean;
   result?: PetCustomThemeImportResult;
   onImport: () => void;
   onClose: () => void;
 }): JSX.Element {
+  const imported = Boolean(result?.ok && result.theme);
+
+  useEffect(() => {
+    if (!imported) return;
+    const timeoutId = window.setTimeout(onClose, 1_200);
+    return () => window.clearTimeout(timeoutId);
+  }, [imported, onClose]);
+
   return createPortal(
     <div className="themeImportOverlay" role="dialog" aria-modal="true" aria-label="导入主题风格">
       <div className="themeImportDialog">
-        <div className="themeImportHeader">
-          <span className="themeImportIcon" aria-hidden="true">
-            <FileJson size={20} />
-          </span>
+        <div className="themeImportHeader themeImportHeaderCompact">
           <div>
             <h3>导入主题风格</h3>
             <p>选择一个主题 JSON，保存后只属于当前桌宠。</p>
@@ -96,24 +99,31 @@ function ThemeImportDialog({
           </button>
         </div>
 
-        <div className="themeImportContent">
+        {imported ? (
+          <div className="themeImportSuccess" role="status" aria-live="polite">
+            <CheckCircle2 size={22} aria-hidden="true" />
+            <div>
+              <strong>主题已导入</strong>
+              <span>{result?.message}，即将关闭。</span>
+            </div>
+          </div>
+        ) : <div className="themeImportContent">
           <div className="themeImportPicker">
             <span className="importFileMark" aria-hidden="true">
-              <FileJson size={22} />
-              <em>JSON</em>
+              <FileJson size={20} />
             </span>
-            <div>
-              <strong>选择主题 JSON</strong>
-              <span>读取后会替换当前桌宠的自定义主题，点击保存后生效。</span>
+            <div className="themeImportCopy">
+              <strong>选择主题文件</strong>
+              <span>仅支持 JSON。导入后，请在主题页面点击“保存”应用到当前桌宠。</span>
             </div>
-            <button className="primaryAction" type="button" disabled={importing} onClick={onImport}>
-              <Upload size={17} />
-              {importing ? "导入中" : "选择文件"}
+            <button className="primaryAction" type="button" onClick={onImport}>
+              <Upload size={16} />
+              选择 JSON 文件
             </button>
           </div>
-        </div>
+        </div>}
 
-        {result && !result.canceled ? (
+        {result && !result.canceled && !imported ? (
           <div className={result.ok ? "settingsResult ok" : "settingsResult error"}>
             <span>{result.message}</span>
           </div>
@@ -178,7 +188,6 @@ export function ThemePanel({
   const [selectedCustomTheme, setSelectedCustomTheme] = useState<PetCustomTheme | undefined>(currentCustomTheme);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [importingTheme, setImportingTheme] = useState(false);
   const [importResult, setImportResult] = useState<PetCustomThemeImportResult | undefined>();
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<LocalPetSaveResult | undefined>();
@@ -235,26 +244,21 @@ export function ThemePanel({
   };
 
   const importUiTheme = async (): Promise<void> => {
-    setImportingTheme(true);
     setImportResult(undefined);
 
-    try {
-      const nextResult = await window.desktopPet?.petConfig.importUiTheme();
+    const nextResult = await window.desktopPet?.petConfig.importUiTheme();
 
-      if (!nextResult) {
-        return;
-      }
+    if (!nextResult) {
+      return;
+    }
 
-      setImportResult(nextResult);
+    setImportResult(nextResult);
 
-      if (nextResult.ok && nextResult.theme) {
-        setSelectedCustomTheme(nextResult.theme);
-        setSelectedTheme("custom");
-        setResult(undefined);
-        onDirtyChange(!isSameTheme("custom", nextResult.theme, savedTheme, savedCustomTheme));
-      }
-    } finally {
-      setImportingTheme(false);
+    if (nextResult.ok && nextResult.theme) {
+      setSelectedCustomTheme(nextResult.theme);
+      setSelectedTheme("custom");
+      setResult(undefined);
+      onDirtyChange(!isSameTheme("custom", nextResult.theme, savedTheme, savedCustomTheme));
     }
   };
 
@@ -384,7 +388,6 @@ export function ThemePanel({
 
       {importDialogOpen ? (
         <ThemeImportDialog
-          importing={importingTheme}
           result={importResult}
           onImport={() => void importUiTheme()}
           onClose={() => {

@@ -81,6 +81,21 @@ import type {
   PresetVoiceTaskSnapshot,
   PresetVoiceTaskStartResult
 } from "../shared/types/presetVoice";
+import type {
+  PetPackageDirectoryPickResult,
+  PetPackageExportInspection,
+  PetPackageExportResult,
+  PetPackageImportAiModelsRequest,
+  PetPackageImportAiModelsResult,
+  PetPackageImportAiRequest,
+  PetPackageImportBeginResult,
+  PetPackageImportCancelRequest,
+  PetPackageImportCommitRequest,
+  PetPackageImportCommitResult,
+  PetPackageImportStepResult,
+  PetPackageImportVoiceRequest,
+  PetPackageProgress
+} from "../shared/types/petPackage";
 
 const startupTimingEnabled = process.env.ZHUOMIANLING_STARTUP_TIMING === "1";
 
@@ -212,6 +227,23 @@ const desktopPetApi = {
       ipcRenderer.invoke("ai-settings:test-output", draft) as Promise<AiOutputCapabilityTestResult>,
     save: (draft: AiConnectionDraft) =>
       ipcRenderer.invoke("ai-settings:save", draft) as Promise<AiConnectionSaveResult>
+  },
+  petPackage: {
+    inspectExport: (petId: string) => ipcRenderer.invoke("pet-package:inspect-export", petId) as Promise<PetPackageExportInspection>,
+    export: (petId: string) => ipcRenderer.invoke("pet-package:export", petId) as Promise<PetPackageExportResult>,
+    beginImport: () => ipcRenderer.invoke("pet-package:begin-import") as Promise<PetPackageImportBeginResult>,
+    listImportAiModels: (request: PetPackageImportAiModelsRequest) => ipcRenderer.invoke("pet-package:list-import-ai-models", request) as Promise<PetPackageImportAiModelsResult>,
+    testImportAi: (request: PetPackageImportAiRequest) => ipcRenderer.invoke("pet-package:test-import-ai", request) as Promise<PetPackageImportStepResult>,
+    pickGptSoVitsRoot: () => ipcRenderer.invoke("pet-package:pick-gpt-sovits-root") as Promise<PetPackageDirectoryPickResult>,
+    testImportVoice: (request: PetPackageImportVoiceRequest) => ipcRenderer.invoke("pet-package:test-import-voice", request) as Promise<PetPackageImportStepResult>,
+    commitImport: (request: PetPackageImportCommitRequest) => ipcRenderer.invoke("pet-package:commit-import", request) as Promise<PetPackageImportCommitResult>,
+    cancelImport: (request: PetPackageImportCancelRequest) => ipcRenderer.invoke("pet-package:cancel-import", request) as Promise<PetPackageImportStepResult>,
+    cancelOperation: (operationId: string) => ipcRenderer.invoke("pet-package:cancel-operation", operationId) as Promise<{ ok: boolean }>,
+    onProgress: (callback: (progress: PetPackageProgress) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, progress: PetPackageProgress): void => callback(progress);
+      ipcRenderer.on("pet-package:progress", listener);
+      return () => { ipcRenderer.off("pet-package:progress", listener); };
+    }
   },
   memory: {
     getSummary: (petId: string) =>

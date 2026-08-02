@@ -69,6 +69,22 @@ describe("Live2D desktop scale integration", () => {
     expect(source).not.toContain("key={rightFaceAnchor");
   });
 
+  it("uses main-process cursor tracking to recover the unlock control while click-through is active", async () => {
+    const source = await readFile(
+      new URL("../pet-window/PetWindow.tsx", import.meta.url),
+      "utf8"
+    );
+    const cursorSubscription = source.slice(
+      source.indexOf("petWindow.onCursorMoved"),
+      source.indexOf("const idleTimerRef")
+    );
+
+    expect(cursorSubscription).toContain("point.windowX >= bounds.left");
+    expect(cursorSubscription).toContain("point.windowY >= bounds.top");
+    expect(cursorSubscription).toContain("setClickThroughControlInteractive(");
+    expect(source).not.toContain('window.addEventListener("mousemove", handleMouseMove)');
+  });
+
   it("saves all quick actions together and broadcasts the result to the active pet window", async () => {
     const [panelSource, ipcSource, windowSource] = await Promise.all([
       readFile(

@@ -22,7 +22,15 @@ export interface AiCapabilityProbeResult {
   status?: number;
 }
 
-const probeModes: AiOutputMode[] = ["json-schema", "json-object", "prompt-json", "plain-text"];
+const structuredProbeModes: AiOutputMode[] = ["json-schema", "json-object", "prompt-json"];
+const probeAttempts: Array<{ mode: AiOutputMode; streaming: boolean }> = [
+  ...structuredProbeModes.flatMap((mode) => [
+    { mode, streaming: true },
+    { mode, streaming: false }
+  ]),
+  { mode: "plain-text", streaming: true },
+  { mode: "plain-text", streaming: false }
+];
 const structuredProbeMessages: AiChatMessage[] = [
   {
     role: "system",
@@ -43,7 +51,8 @@ const textProbeMessages: AiChatMessage[] = [
     content: "回复 probe-ok。"
   }
 ];
-const probeTimeoutMs = 12_000;
+const probeRequestTimeoutMs = 12_000;
+const probeTotalTimeoutMs = 120_000;
 
 async function readBoundedText(response: Response): Promise<string | undefined> {
   if (!response.body) {
@@ -140,48 +149,64 @@ export async function probeAiOutputCapability(options: {
   model: string;
   apiKey: string;
   checkedAt?: string;
+  signal?: AbortSignal;
 }): Promise<AiCapabilityProbeResult> {
   const checkedAt = options.checkedAt ?? new Date().toISOString();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("capability-probe-timeout"), probeTimeoutMs);
+  const totalController = new AbortController();
+  const abortFromCaller = (): void => totalController.abort("capability-probe-canceled");
+  options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  if (options.signal?.aborted) abortFromCaller();
+  const totalTimeout = setTimeout(
+    () => totalController.abort("capability-probe-total-timeout"),
+    probeTotalTimeoutMs
+  );
 
   try {
-    // Prefer a usable streaming mode for low first-token latency. If every
-    // streaming request is rejected, repeat the same bounded matrix without
-    // streaming so providers that only implement complete responses still work.
-    for (const requestedStreaming of [true, false]) {
-      for (const mode of probeModes) {
-        let response: Response;
-        try {
-          response = await fetch(buildChatCompletionsUrl(options.baseUrl), {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${options.apiKey}`,
-              "Content-Type": "application/json",
-              Accept: requestedStreaming
-                ? "text/event-stream, application/json"
-                : "application/json"
-            },
-            signal: controller.signal,
-            body: JSON.stringify(
-              buildAiChatRequestBody({
-                model: options.model,
-                messages: mode === "plain-text" ? textProbeMessages : structuredProbeMessages,
-                mode,
-                contract: createAiReplyContract({ tier: getAiProtocolTierForMode(mode) }),
-                stream: requestedStreaming,
-                temperature: 0,
-                maxTokens: 64
-              })
-            )
-          });
-        } catch {
-          return {
-            capability: fallbackCapability(options.baseUrl, options.model, checkedAt),
-            tested: false,
-            failureKind: "network"
-          };
-        }
+    // Exhaust every structured protocol in both streaming and complete-response
+    // transport before probing plain text. A provider that only supports
+    // non-streaming structured output must never be classified as text-only.
+    for (const attempt of probeAttempts) {
+      if (totalController.signal.aborted) {
+        return {
+          capability: fallbackCapability(options.baseUrl, options.model, checkedAt),
+          tested: false,
+          failureKind: "network"
+        };
+      }
+
+      const attemptController = new AbortController();
+      const abortAttemptFromTotal = (): void => {
+        attemptController.abort(totalController.signal.reason ?? "capability-probe-total-timeout");
+      };
+      totalController.signal.addEventListener("abort", abortAttemptFromTotal, { once: true });
+      const requestTimeout = setTimeout(
+        () => attemptController.abort("capability-probe-request-timeout"),
+        probeRequestTimeoutMs
+      );
+
+      try {
+        const response = await fetch(buildChatCompletionsUrl(options.baseUrl), {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${options.apiKey}`,
+            "Content-Type": "application/json",
+            Accept: attempt.streaming
+              ? "text/event-stream, application/json"
+              : "application/json"
+          },
+          signal: attemptController.signal,
+          body: JSON.stringify(
+            buildAiChatRequestBody({
+              model: options.model,
+              messages: attempt.mode === "plain-text" ? textProbeMessages : structuredProbeMessages,
+              mode: attempt.mode,
+              contract: createAiReplyContract({ tier: getAiProtocolTierForMode(attempt.mode) }),
+              stream: attempt.streaming,
+              temperature: 0,
+              maxTokens: 256
+            })
+          )
+        });
 
         if (!response.ok) {
           const mayTryCompatibleFormat = canFallbackAiOutputMode(response.status);
@@ -202,21 +227,40 @@ export async function probeAiOutputCapability(options: {
         const rawBody = await readBoundedText(response);
         if (!rawBody) continue;
         const extracted = extractProbeContent(rawBody);
-        if (!isProbeReplyValid(extracted.content, mode)) continue;
+        if (!isProbeReplyValid(extracted.content, attempt.mode)) continue;
 
         return {
           capability: {
             baseUrl: options.baseUrl,
             model: options.model,
-            mode,
-            protocolTier: getAiProtocolTierForMode(mode),
-            streaming: requestedStreaming && extracted.streaming,
+            mode: attempt.mode,
+            protocolTier: getAiProtocolTierForMode(attempt.mode),
+            streaming: attempt.streaming && extracted.streaming,
             confidence: "tested",
             checkedAt,
             probeVersion: 2
           },
           tested: true
         };
+      } catch {
+        if (totalController.signal.aborted) {
+          return {
+            capability: fallbackCapability(options.baseUrl, options.model, checkedAt),
+            tested: false,
+            failureKind: "network"
+          };
+        }
+        if (attemptController.signal.reason === "capability-probe-request-timeout") {
+          continue;
+        }
+        return {
+          capability: fallbackCapability(options.baseUrl, options.model, checkedAt),
+          tested: false,
+          failureKind: "network"
+        };
+      } finally {
+        clearTimeout(requestTimeout);
+        totalController.signal.removeEventListener("abort", abortAttemptFromTotal);
       }
     }
   } catch {
@@ -226,7 +270,8 @@ export async function probeAiOutputCapability(options: {
       failureKind: "network"
     };
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(totalTimeout);
+    options.signal?.removeEventListener("abort", abortFromCaller);
   }
 
   return {

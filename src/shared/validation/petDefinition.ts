@@ -152,6 +152,40 @@ function stringArrayOrDefault(value: unknown, fallback: string[], fieldName: str
   return [...value];
 }
 
+function normalizePetEventSettings(value: unknown): PetDefinition["eventSettings"] {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const settings = recordOrEmpty(value, "eventSettings");
+
+  return Object.fromEntries(
+    Object.entries(settings).map(([eventName, rawSettings]) => {
+      if (!eventName.trim() || eventName.length > 128) {
+        throw new Error(`桌宠配置字段 eventSettings.${eventName} 的类型无效。`);
+      }
+
+      const eventSettings = recordOrEmpty(rawSettings, `eventSettings.${eventName}`);
+
+      return [
+        eventName,
+        {
+          ...eventSettings,
+          ...(eventSettings.showSubtitle === undefined
+            ? {}
+            : {
+                showSubtitle: booleanOrDefault(
+                  eventSettings.showSubtitle,
+                  true,
+                  `eventSettings.${eventName}.showSubtitle`
+                )
+              })
+        }
+      ];
+    })
+  ) as NonNullable<PetDefinition["eventSettings"]>;
+}
+
 function normalizeVoiceModelSettings(value: unknown): PetVoiceModelSettings | undefined {
   if (value === undefined || value === null) {
     return undefined;
@@ -311,6 +345,7 @@ export function normalizeLegacyPetDefinition(pet: PetDefinition): PetDefinition 
     },
     voiceModelSettings: normalizeVoiceModelSettings(rawPet.voiceModelSettings),
     lines,
+    eventSettings: normalizePetEventSettings(rawPet.eventSettings),
     moodSettings: normalizePetMoodSettings(rawPet.moodSettings),
     uiSettings: {
       ...uiSettings,

@@ -89,6 +89,43 @@ describe("AI API key storage", () => {
     expect(normalizeAiBaseUrl("http://Example.COM:80/")).toBe("http://example.com");
   });
 
+  it("persists verified import evidence without repeating network probes", async () => {
+    const { getAiConnectionSummary, saveAiConnection } = await import("./aiSettings");
+    const checkedAt = "2026-07-28T00:00:00.000Z";
+    const result = await saveAiConnection(
+      {
+        petId: "imported-pet",
+        providerName: "Provider A",
+        baseUrl: "https://api.example.com/v1",
+        model: "model-a",
+        apiKey: "private-key",
+        models: [{ id: "model-a", name: "Model A" }]
+      },
+      {
+        models: [{ id: "model-a", name: "Model A" }],
+        checkedAt,
+        outputCapability: {
+          baseUrl: "https://api.example.com/v1",
+          model: "model-a",
+          mode: "json-schema",
+          protocolTier: "full",
+          streaming: true,
+          confidence: "tested",
+          checkedAt,
+          probeVersion: 2
+        }
+      }
+    );
+
+    expect(result.test).toMatchObject({ ok: true, checkedAt });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(getAiConnectionSummary("imported-pet")).resolves.toMatchObject({
+      model: "model-a",
+      hasApiKey: true,
+      outputCapability: { mode: "json-schema", confidence: "tested" }
+    });
+  });
+
   it("migrates a legacy plaintext key and removes it from public metadata", async () => {
     await writeLegacySettings();
     const {
@@ -547,6 +584,65 @@ describe("AI API key storage", () => {
       confidence: "tested"
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires three consecutive text-only probes before downgrading a saved full protocol", async () => {
+    fetchMock
+      .mockResolvedValueOnce(createModelsResponse())
+      .mockResolvedValueOnce(createProbeResponse());
+    const {
+      getAiConnectionSummary,
+      saveAiConnection,
+      testAiOutputCapability
+    } = await import("./aiSettings");
+    await saveAiConnection({
+      petId: "pet-a",
+      providerName: "Provider A",
+      baseUrl: "https://api.example.com/v1",
+      model: "model-a",
+      apiKey: "private-key"
+    });
+
+    fetchMock.mockReset();
+    for (let probeIndex = 0; probeIndex < 3; probeIndex += 1) {
+      for (let structuredAttempt = 0; structuredAttempt < 6; structuredAttempt += 1) {
+        fetchMock.mockResolvedValueOnce(createProbeResponse('{"reply":"probe-ok"}'));
+      }
+      fetchMock.mockResolvedValueOnce(createProbeResponse("probe-ok"));
+    }
+
+    const draft = {
+      petId: "pet-a",
+      providerName: "Provider A",
+      baseUrl: "https://api.example.com/v1",
+      model: "model-a",
+      apiKey: ""
+    };
+    const first = await testAiOutputCapability(draft);
+    const second = await testAiOutputCapability(draft);
+    const beforeThreshold = await getAiConnectionSummary("pet-a");
+    const third = await testAiOutputCapability(draft);
+    const afterThreshold = await getAiConnectionSummary("pet-a");
+
+    expect(first).toMatchObject({
+      ok: true,
+      message: expect.stringContaining("1/3"),
+      capability: { protocolTier: "full" }
+    });
+    expect(second).toMatchObject({
+      ok: true,
+      message: expect.stringContaining("2/3"),
+      capability: { protocolTier: "full" }
+    });
+    expect(beforeThreshold?.outputCapability).toMatchObject({ protocolTier: "full" });
+    expect(third).toMatchObject({
+      ok: true,
+      capability: { mode: "plain-text", protocolTier: "text" }
+    });
+    expect(afterThreshold?.outputCapability).toMatchObject({
+      mode: "plain-text",
+      protocolTier: "text"
+    });
   });
 
   it("upgrades a saved text fallback after a successful explicit retest", async () => {

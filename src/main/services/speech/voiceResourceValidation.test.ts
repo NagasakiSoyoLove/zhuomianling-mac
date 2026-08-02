@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   sanitizeVoiceDiagnosticText,
   toUserFacingGptSoVitsError,
+  validateGptSoVitsRoot,
   validateReadableVoiceFile
 } from "./voiceResourceValidation";
 
@@ -32,6 +33,22 @@ describe("voice resource validation", () => {
     await expect(validateReadableVoiceFile(modelPath, "sovits")).rejects.toThrow(
       "SoVITS 模型“model.txt”的文件类型不受支持，请重新选择。"
     );
+  });
+
+  it("rejects an arbitrary readable directory as a GPT-SoVITS root", async () => {
+    await expect(validateGptSoVitsRoot(temporaryDirectory)).rejects.toThrow(
+      "缺少：runtime"
+    );
+  });
+
+  it("accepts the complete directory structure required by the managed runtime", async () => {
+    await fs.mkdir(path.join(temporaryDirectory, "runtime"), { recursive: true });
+    await fs.mkdir(path.join(temporaryDirectory, "GPT_SoVITS", "pretrained_models", "chinese-roberta-wwm-ext-large"), { recursive: true });
+    await fs.mkdir(path.join(temporaryDirectory, "GPT_SoVITS", "pretrained_models", "chinese-hubert-base"), { recursive: true });
+    await fs.writeFile(path.join(temporaryDirectory, "runtime", "python.exe"), "python");
+    await fs.writeFile(path.join(temporaryDirectory, "api_v2.py"), "api");
+
+    await expect(validateGptSoVitsRoot(temporaryDirectory)).resolves.toBeUndefined();
   });
 });
 

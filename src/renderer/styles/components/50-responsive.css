@@ -108,4 +108,16 @@
   .voiceServiceActions {
     flex-wrap: wrap;
   }
+
+  .llmSectionHeader {
+    flex-direction: column;
+  }
+
+  .llmInlineAction {
+    align-self: flex-start;
+  }
+
+  .llmCapabilityHeaderAction {
+    align-self: flex-end;
+  }
 }

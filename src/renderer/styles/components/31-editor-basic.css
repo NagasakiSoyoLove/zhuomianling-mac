@@ -352,8 +352,209 @@
   align-content: start;
 }
 
+.llmConfigFlow {
+  display: grid;
+  max-width: 760px;
+  gap: 18px;
+}
+
+.llmSection {
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--ui-line);
+  border-radius: 18px;
+  padding: 18px 20px;
+  background: var(--ui-glass);
+  box-shadow: var(--ui-highlight);
+}
+
+.llmSectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.llmSectionHeading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 11px;
+}
+
+.llmStep {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent-ink);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.llmSectionHeading h3 {
+  margin: 1px 0 0;
+  color: var(--ui-ink);
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.llmSectionHeading p {
+  margin: 4px 0 0;
+  color: var(--ui-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .llmSettingsForm {
   max-width: 680px;
+}
+
+.llmFieldHint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--ui-muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.llmFieldHint svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--ui-soft);
+}
+
+.llmFieldHint.warning {
+  color: var(--ui-warning);
+}
+
+.llmFieldHint.warning svg {
+  color: var(--ui-warning);
+}
+
+.llmModelField {
+  max-width: 680px;
+}
+
+.llmInlineAction {
+  flex: 0 0 auto;
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.llmCapabilityHeaderAction {
+  align-self: flex-start;
+}
+
+.secretInputWrap input {
+  padding-right: 46px;
+}
+
+.secretInputToggle {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  color: var(--ui-soft);
+  background: transparent;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.secretInputWrap .secretInputToggle svg {
+  position: static;
+  left: auto;
+}
+
+.secretInputToggle:hover:not(:disabled) {
+  color: var(--ui-accent-ink);
+  background: var(--ui-accent-soft);
+}
+
+.secretInputToggle:focus-visible {
+  outline: 3px solid var(--ui-accent-soft);
+  outline-offset: 1px;
+}
+
+.secretInputToggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.llmCapabilityCard {
+  display: grid;
+  gap: 13px;
+  border: 1px solid var(--ui-line);
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: var(--ui-glass-strong);
+}
+
+.llmCapabilitySummary {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--ui-success);
+}
+
+.llmCapabilitySummary.pending {
+  color: var(--ui-warning);
+}
+
+.llmCapabilitySummary > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.llmCapabilitySummary > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.llmCapabilitySummary strong {
+  color: var(--ui-ink);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.llmCapabilitySummary span {
+  color: var(--ui-muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.llmCapabilityTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding-left: 30px;
+}
+
+.llmCapabilityTags span {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 16%, transparent);
+  border-radius: 999px;
+  padding: 0 9px;
+  color: var(--ui-accent-ink);
+  background: var(--ui-accent-soft);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .llmSettingsForm .settingsField input,
@@ -364,7 +565,17 @@
 }
 
 .llmSettingsActions {
+  max-width: 760px;
   margin-top: 2px;
+}
+
+.llmSettingsActions .primaryAction {
+  min-width: 126px;
+}
+
+.llmConfigPanel .connectionBadge.dirty {
+  color: var(--ui-accent-ink);
+  background: var(--ui-accent-soft);
 }
 
 .formGrid.threeColumns {

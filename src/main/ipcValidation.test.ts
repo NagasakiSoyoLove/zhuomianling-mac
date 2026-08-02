@@ -3,6 +3,23 @@ import { describe, expect, it } from "vitest";
 import { validateIpcArguments, validatedIpcChannels } from "./ipcValidation";
 
 describe("validateIpcArguments", () => {
+  it("validates bounded main-window pet package requests", () => {
+    expect(() => validateIpcArguments("pet-package:begin-import", [])).not.toThrow();
+    expect(() => validateIpcArguments("pet-package:export", ["pet-a"])).not.toThrow();
+    expect(() => validateIpcArguments("pet-package:export", ["../pet"])).toThrow(/桌宠 ID/);
+    expect(() => validateIpcArguments("pet-package:test-import-ai", [{
+      sessionId: "session-1",
+      draft: { baseUrl: "https://example.test/v1", model: "m", apiKey: "k" }
+    }])).not.toThrow();
+    expect(() => validateIpcArguments("pet-package:list-import-ai-models", [{
+      sessionId: "session-1", baseUrl: "https://example.test/v1", apiKey: "k"
+    }])).not.toThrow();
+    expect(() => validateIpcArguments("pet-package:test-import-ai", [{
+      sessionId: "session-1",
+      draft: { baseUrl: "https://example.test/v1", model: "m", apiKey: "x".repeat(16_385) }
+    }])).toThrow(/apiKey/);
+    expect(() => validateIpcArguments("pet-package:commit-import", [{ sessionId: "x".repeat(65) }])).toThrow(/sessionId/);
+  });
   it("accepts a bounded AI stream request", () => {
     expect(() =>
       validateIpcArguments("ai-chat:stream", [
@@ -431,6 +448,18 @@ describe("validateIpcArguments", () => {
         }
       ])
     ).not.toThrow();
+  });
+
+  it("accepts a boolean event subtitle switch and rejects other types", () => {
+    expect(() => validateIpcArguments("pet-config:save-event-settings", [{
+      petId: "pet-a",
+      events: [{ event: "click", lines: ["你好"], showSubtitle: false }]
+    }])).not.toThrow();
+
+    expect(() => validateIpcArguments("pet-config:save-event-settings", [{
+      petId: "pet-a",
+      events: [{ event: "click", lines: ["你好"], showSubtitle: "false" }]
+    }])).toThrow(/showSubtitle/);
   });
 
   it("accepts a bounded mood range entry line and rejects an oversized one", () => {

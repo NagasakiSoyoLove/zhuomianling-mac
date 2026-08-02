@@ -55,3 +55,14 @@ BAAI/bge-small-zh-v1.5 revision
 
 仓库不会提交生成后的 runtime 或模型二进制。发布准备流程会在被忽略的缓存
 目录中生成它们，打包审计会按生成的 SHA-256 白名单逐文件验证。
+
+
+桌宠包归档依赖
+--------------
+
+`.zmling` 的流式 ZIP 写入与逐 entry 读取分别使用：
+
+- yazl 3.3.1 — MIT License — https://github.com/thejoshwolfe/yazl
+- yauzl 3.4.0 — MIT License — https://github.com/thejoshwolfe/yauzl
+
+这些依赖只提供通用归档能力，不包含任何用户桌宠、模型、声音或配置数据。

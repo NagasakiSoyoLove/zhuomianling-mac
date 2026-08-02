@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, FolderOpen, MousePointer2, Plus, Sparkles, Trash2 } from "lucide-react";
+import { AlertTriangle, FolderOpen, MousePointer2, PackageOpen, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { LocalPetConfigCorruption, PetDefinition } from "../../shared/types/pet";
 import type { PetWindowState } from "../../shared/types/window";
 import type { MemoryBookRouteState } from "../components/MemoryBook/memoryBookState";
@@ -8,6 +8,7 @@ import { PetSelector } from "../components/PetSelector/PetSelector";
 import { StartupSplash } from "../components/StartupSplash/StartupSplash";
 import { hasUsableLive2DModel, loadAvailablePets } from "../pets/petSources";
 import { DeferredViewBoundary } from "./DeferredViewBoundary";
+import { PetPackageImportDialog } from "../components/PetPackage/PetPackageImportDialog";
 
 const PetEditor = lazy(async () => {
   const module = await import("../components/PetEditor/PetEditor");
@@ -259,6 +260,8 @@ export function App(): JSX.Element {
   const [deletingPet, setDeletingPet] = useState(false);
   const [configCorruption, setConfigCorruption] = useState<LocalPetConfigCorruption | undefined>();
   const [restoringConfig, setRestoringConfig] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const importButtonRef = useRef<HTMLButtonElement>(null);
   const [petWindowState, setPetWindowState] = useState<PetWindowState>({
     visible: false,
     clickThrough: false
@@ -554,6 +557,12 @@ export function App(): JSX.Element {
     setEditorOptions({ mode: "edit", petId: pet.id });
   };
 
+  const handlePackageImported = (pet: PetDefinition): void => {
+    setAvailablePets((current) => [pet, ...current.filter((item) => item.id !== pet.id)]);
+    setSelectedPetId(pet.id);
+    setToastText(`${pet.name} 已导入`);
+  };
+
   const activatePet = async (petId: string): Promise<void> => {
     const operationSequence = ++petOperationSequenceRef.current;
     const targetPet = availablePets.find((pet) => pet.id === petId);
@@ -777,9 +786,15 @@ export function App(): JSX.Element {
           </span>
           <span>主页</span>
         </div>
-        <div className="statusBlock">
-          <span className={activePetId ? "statusDot online" : "statusDot"} />
-          <span>{activePetId ? "桌宠运行中" : "未启用"}</span>
+        <div className="topbarActionGroup">
+          <button ref={importButtonRef} className="topbarImportButton" type="button" onClick={() => setImportDialogOpen(true)}>
+            <PackageOpen size={17} />
+            导入桌宠
+          </button>
+          <div className="statusBlock">
+            <span className={activePetId ? "statusDot online" : "statusDot"} />
+            <span>{activePetId ? "桌宠运行中" : "未启用"}</span>
+          </div>
         </div>
       </header>
 
@@ -860,6 +875,10 @@ export function App(): JSX.Element {
           onRestore={restoreCorruptedConfig}
         />
       ) : null}
+      {importDialogOpen ? <PetPackageImportDialog onImported={handlePackageImported} onClose={() => {
+        setImportDialogOpen(false);
+        window.requestAnimationFrame(() => importButtonRef.current?.focus());
+      }} /> : null}
       {isStartupSplashVisible ? <StartupSplash leaving={isStartupSplashLeaving} /> : null}
     </main>
   );

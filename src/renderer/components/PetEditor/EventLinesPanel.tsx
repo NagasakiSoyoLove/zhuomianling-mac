@@ -361,18 +361,36 @@ export function EventLinesPanel({
                         <em>{candidateLineCount} 条</em>
                         {presetTargets.length ? <em className="eventPresetVoiceCoverage">语音 {readyPresetCount} / {presetTargets.length}</em> : null}
                       </span>
-                      <button
-                        className="eventAddLineButton"
-                        type="button"
-                        onClick={() =>
-                          updateEvent(event.id, {
-                            lines: [...(eventDraft?.lines ?? []), ""]
-                          })
-                        }
-                      >
-                        <Plus size={14} />
-                        新增
-                      </button>
+                      <div className="eventLinesHeaderActions">
+                        <span className="eventSubtitleToggle">
+                          <span>显示气泡</span>
+                          <label className="settingsSwitch" title={`${event.label}触发时显示台词气泡`}>
+                            <input
+                              type="checkbox"
+                              checked={eventDraft?.showSubtitle !== false}
+                              aria-label={`${event.label}触发时显示台词气泡`}
+                              onChange={(changeEvent) =>
+                                updateEvent(event.id, {
+                                  showSubtitle: changeEvent.target.checked
+                                })
+                              }
+                            />
+                            <span aria-hidden="true" />
+                          </label>
+                        </span>
+                        <button
+                          className="eventAddLineButton"
+                          type="button"
+                          onClick={() =>
+                            updateEvent(event.id, {
+                              lines: [...(eventDraft?.lines ?? []), ""]
+                            })
+                          }
+                        >
+                          <Plus size={14} />
+                          新增
+                        </button>
+                      </div>
                     </div>
                     <div className="eventLineList">
                       {lines.map((line, index) => {

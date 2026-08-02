@@ -100,6 +100,21 @@ describe("旧版桌宠配置兼容", () => {
     });
   });
 
+  it("保留事件气泡开关并拒绝错误类型", () => {
+    const normalized = normalizeLegacyPetDefinition(legacyPet({
+      eventSettings: {
+        click: { showSubtitle: false }
+      }
+    }));
+
+    expect(normalized.eventSettings?.click?.showSubtitle).toBe(false);
+    expect(() => normalizeLegacyPetDefinition(legacyPet({
+      eventSettings: {
+        click: { showSubtitle: "false" }
+      }
+    }))).toThrow(/eventSettings\.click\.showSubtitle/);
+  });
+
   it("把桌宠整体比例限制到受支持范围并对齐到五个百分点", () => {
     expect(normalizeLegacyPetDefinition(legacyPet({
       uiSettings: { theme: "soft", desktopScale: 2.5 }
