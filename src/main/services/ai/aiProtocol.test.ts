@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAiChatRequestBody,
   buildAiResponseFormat,
+  buildAiProviderMessage,
   getAiOutputModeFallbacks
 } from "./aiProtocol";
 import { createAiReplyContract } from "../../../shared/aiContract";
@@ -65,5 +66,33 @@ describe("AI protocol output modes", () => {
       "json-object",
       createAiReplyContract({ tier: "text" })
     )).toThrow(/full desktop-pet protocol/);
+  });
+
+  // TIMED DIAGNOSTICS TEST MODULE: screenshot history attachment coverage.
+  it("keeps an attached screenshot on the same multimodal history message", () => {
+    const body = buildAiChatRequestBody({
+      model: "vision-model",
+      messages: [{
+        role: "user",
+        content: "这张图里是什么？",
+        image: { data: new Uint8Array([1, 2, 3, 4]), mimeType: "image/jpeg" }
+      }],
+      mode: "plain-text",
+      stream: false
+    });
+    expect(body.messages).toEqual([{
+      role: "user",
+      content: [
+        { type: "text", text: "这张图里是什么？" },
+        {
+          type: "image_url",
+          image_url: { url: "data:image/jpeg;base64,AQIDBA==" }
+        }
+      ]
+    }]);
+    expect(buildAiProviderMessage({ role: "user", content: "文字" })).toEqual({
+      role: "user",
+      content: "文字"
+    });
   });
 });

@@ -11,7 +11,7 @@ import { PanelSaveActions } from "./EditorShared";
 
 const defaultClickThroughOpacity = 0.45;
 const minClickThroughOpacity = 0.2;
-const maxClickThroughOpacity = 0.8;
+const maxClickThroughOpacity = 1;
 
 function normalizeClickThroughOpacity(value: number | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {

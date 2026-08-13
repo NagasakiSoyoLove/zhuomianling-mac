@@ -1,5 +1,6 @@
 import type { MemorySettings } from "./memory";
 import type { PetMoodRangeId } from "../mood";
+import type { ScreenAwarenessMode } from "./screen";
 
 export interface PetCapabilities {
   chat: boolean;
@@ -167,7 +168,8 @@ export const petRadialMenuActionKinds = [
   "touch",
   "chat",
   "mood",
-  "danger"
+  "danger",
+  "vision"
 ] as const;
 
 export type PetRadialMenuActionKind = (typeof petRadialMenuActionKinds)[number];
@@ -344,6 +346,12 @@ export interface PetUiSettings {
   desktopPosition?: PetDesktopPosition;
 }
 
+export interface ScreenAwarenessSettings {
+  enabled: boolean;
+  mode?: ScreenAwarenessMode;
+  persistentCaptureEnabled?: boolean;
+}
+
 export interface PetDefinition {
   id: string;
   name: string;
@@ -359,6 +367,7 @@ export interface PetDefinition {
   live2dSettings?: PetLive2DSettings;
   uiSettings?: PetUiSettings;
   memorySettings?: MemorySettings;
+  screenAwarenessSettings?: ScreenAwarenessSettings;
   moodSettings?: PetMoodSettings;
   capabilities: PetCapabilities;
   details: PetDetails;
@@ -424,9 +433,18 @@ export interface LocalPetUiSettingsDraft {
   petId: string;
   theme: PetUiTheme;
   customTheme?: PetCustomTheme;
+  /** 仅由编辑器的显式“删除导入主题”操作设置。 */
+  removeCustomTheme?: boolean;
   clickThroughOpacity?: number;
   cursorFollowEnabled?: boolean;
   desktopScale?: number;
+}
+
+export interface LocalPetScreenAwarenessDraft {
+  petId: string;
+  enabled: boolean;
+  mode?: ScreenAwarenessMode;
+  persistentCaptureEnabled?: boolean;
 }
 
 export interface LocalPetVoiceInputDraft {

@@ -1,5 +1,6 @@
 import { app } from "electron";
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import {
   normalizeAiBaseUrl,
@@ -59,9 +60,123 @@ let migrationPromise: Promise<void> | undefined;
 const petMutationQueues = new Map<string, Promise<void>>();
 const fullProtocolDowngradeFailures = new Map<string, number>();
 
+interface CachedAiModelsVerification {
+  models: AiModelOption[];
+  checkedAt: string;
+}
+
+// These caches only retain successful checks for the current process. The API
+// key itself, or any reversible representation of it, never leaves the key
+// resolver and is never persisted as part of the cache.
+const aiModelsVerificationCache = new Map<string, CachedAiModelsVerification>();
+const aiOutputVerificationCache = new Map<string, AiOutputCapability>();
+const maxAiVerificationCacheEntries = 128;
+
 interface CapabilityStabilityDecision {
   capability: AiOutputCapability;
   retainedFullProtocolFailureCount?: number;
+}
+
+function getApiKeyDigest(apiKey: string): string {
+  return createHash("sha256").update(apiKey, "utf8").digest("hex");
+}
+
+function getAiEndpointVerificationKey(draft: AiConnectionDraft, apiKey: string): string {
+  return `${draft.petId}\0${draft.baseUrl}\0${getApiKeyDigest(apiKey)}`;
+}
+
+function getAiOutputVerificationKey(draft: AiConnectionDraft, apiKey: string): string {
+  return `${getAiEndpointVerificationKey(draft, apiKey)}\0${draft.model}`;
+}
+
+function trimVerificationCache<T>(cache: Map<string, T>): void {
+  while (cache.size > maxAiVerificationCacheEntries) {
+    const oldestKey = cache.keys().next().value;
+    if (typeof oldestKey !== "string") return;
+    cache.delete(oldestKey);
+  }
+}
+
+function rememberAiModelsVerification(
+  draft: AiConnectionDraft,
+  apiKey: string,
+  result: AiModelListResult
+): void {
+  if (!result.ok || !result.models.length) return;
+
+  const key = getAiEndpointVerificationKey(draft, apiKey);
+  aiModelsVerificationCache.delete(key);
+  aiModelsVerificationCache.set(key, {
+    models: result.models.map((model) => ({ ...model })),
+    checkedAt: result.checkedAt
+  });
+  trimVerificationCache(aiModelsVerificationCache);
+}
+
+function getCachedAiModelsVerification(
+  draft: AiConnectionDraft,
+  apiKey: string
+): CachedAiModelsVerification | undefined {
+  return aiModelsVerificationCache.get(getAiEndpointVerificationKey(draft, apiKey));
+}
+
+function rememberAiOutputVerification(
+  draft: AiConnectionDraft,
+  apiKey: string,
+  capability: AiOutputCapability
+): void {
+  if (capability.confidence !== "tested") return;
+
+  const key = getAiOutputVerificationKey(draft, apiKey);
+  aiOutputVerificationCache.delete(key);
+  aiOutputVerificationCache.set(key, { ...capability });
+  trimVerificationCache(aiOutputVerificationCache);
+}
+
+function getCachedAiOutputVerification(
+  draft: AiConnectionDraft,
+  apiKey: string
+): AiOutputCapability | undefined {
+  return aiOutputVerificationCache.get(getAiOutputVerificationKey(draft, apiKey));
+}
+
+function clearAiOutputVerificationForConfig(
+  petId: string,
+  baseUrl: string,
+  model: string
+): void {
+  const prefix = `${petId}\0${baseUrl}\0`;
+  const suffix = `\0${model}`;
+  for (const key of aiOutputVerificationCache.keys()) {
+    if (key.startsWith(prefix) && key.endsWith(suffix)) {
+      aiOutputVerificationCache.delete(key);
+    }
+  }
+}
+
+function clearAiVerificationCache(petId: string): void {
+  const prefix = `${petId}\0`;
+  for (const key of aiModelsVerificationCache.keys()) {
+    if (key.startsWith(prefix)) aiModelsVerificationCache.delete(key);
+  }
+  for (const key of aiOutputVerificationCache.keys()) {
+    if (key.startsWith(prefix)) aiOutputVerificationCache.delete(key);
+  }
+}
+
+function hasMatchingTestedOutputCapability(
+  config: AiConnectionConfig | undefined,
+  draft: AiConnectionDraft
+): config is AiConnectionConfig & { outputCapability: AiOutputCapability } {
+  const capability = config?.outputCapability;
+  return Boolean(
+    !draft.apiKey &&
+    config?.baseUrl === draft.baseUrl &&
+    config.model === draft.model &&
+    capability?.confidence === "tested" &&
+    capability.baseUrl === draft.baseUrl &&
+    capability.model === draft.model
+  );
 }
 
 function getCapabilityStabilityKey(petId: string, baseUrl: string, model: string): string {
@@ -631,7 +746,9 @@ export async function listAiModels(draft: AiConnectionDraft, signal?: AbortSigna
     return getMissingApiKeyResult(checkedAt, resolution.endpointChanged);
   }
 
-  return fetchAiModels(normalized, resolution.apiKey, checkedAt, signal);
+  const result = await fetchAiModels(normalized, resolution.apiKey, checkedAt, signal);
+  rememberAiModelsVerification(normalized, resolution.apiKey, result);
+  return result;
 }
 
 export async function testAiConnection(draft: AiConnectionDraft): Promise<AiConnectionTestResult> {
@@ -724,6 +841,9 @@ export async function testAiOutputCapability(
     }
 
     const effectiveCapability = stabilityDecision?.capability ?? probe.capability;
+    if (probe.tested) {
+      rememberAiOutputVerification(normalized, resolution.apiKey, effectiveCapability);
+    }
 
     return {
       ok: probe.tested,
@@ -755,6 +875,7 @@ export async function recordAiOutputCapability(
       ) {
         return;
       }
+      clearAiOutputVerificationForConfig(petId, current.baseUrl, current.model);
       current.outputCapability = capability;
       await writeSettingsFile(settings);
     });
@@ -841,13 +962,36 @@ export async function saveAiConnection(
       };
     }
 
+    const cachedModelsVerification = verifiedEvidence
+      ? undefined
+      : getCachedAiModelsVerification(normalized, resolution.apiKey);
+    const persistedModels = !normalized.apiKey && existingConfig?.baseUrl === normalized.baseUrl
+      ? existingConfig.models
+      : undefined;
+    const reusableModels = verifiedModels?.length
+      ? verifiedModels
+      : cachedModelsVerification?.models ?? persistedModels;
     const modelsResult = verifiedEvidence ? {
       ok: true,
       message: "已复用导入向导中的 AI 检测结果。",
       checkedAt: verifiedEvidence.checkedAt,
       models: verifiedModels!
+    } satisfies AiModelListResult : reusableModels?.length ? {
+      ok: true,
+      message: "已复用已完成的模型列表检测。",
+      checkedAt: cachedModelsVerification?.checkedAt ?? existingConfig?.updatedAt ?? checkedAt,
+      models: reusableModels
     } satisfies AiModelListResult : await fetchAiModels(normalized, resolution.apiKey, checkedAt);
-    const capabilityProbe = !verifiedEvidence && modelsResult.ok && normalized.model
+    const cachedOutputVerification = verifiedEvidence
+      ? undefined
+      : getCachedAiOutputVerification(normalized, resolution.apiKey);
+    const persistedOutputVerification = hasMatchingTestedOutputCapability(existingConfig, normalized)
+      ? existingConfig.outputCapability
+      : undefined;
+    const reusableOutputVerification = verifiedCapability
+      ?? cachedOutputVerification
+      ?? persistedOutputVerification;
+    const capabilityProbe = !verifiedEvidence && !reusableOutputVerification && modelsResult.ok && normalized.model
       ? await probeAiOutputCapability({
           baseUrl: normalized.baseUrl,
           model: normalized.model,
@@ -855,7 +999,7 @@ export async function saveAiConnection(
           checkedAt
         })
       : undefined;
-    const outputCapability = verifiedCapability ?? (capabilityProbe?.tested
+    const outputCapability = reusableOutputVerification ?? (capabilityProbe?.tested
       ? capabilityProbe.capability
       : existingConfig?.baseUrl === normalized.baseUrl && existingConfig.model === normalized.model
         ? existingConfig.outputCapability
@@ -867,9 +1011,11 @@ export async function saveAiConnection(
       model: normalized.model,
       models: verifiedModels?.length
         ? verifiedModels
-        : normalized.models?.length
-          ? normalized.models
-          : existingConfig?.models ?? [],
+        : modelsResult.ok
+          ? modelsResult.models
+          : normalized.models?.length
+            ? normalized.models
+            : existingConfig?.models ?? [],
       outputCapability,
       updatedAt: new Date().toISOString()
     };
@@ -879,10 +1025,12 @@ export async function saveAiConnection(
         ? verifiedEvidence
           ? "AI 设置已使用导入向导的检测结果保存。"
           : `连接成功，设置已保存。${capabilityProbe
-          ? ` ${capabilityProbe.tested
-            ? getCapabilityMessage(capabilityProbe.capability)
-            : getCapabilityProbeFailureMessage(capabilityProbe.failureKind, capabilityProbe.status)}`
-          : ""}`
+            ? ` ${capabilityProbe.tested
+              ? getCapabilityMessage(capabilityProbe.capability)
+              : getCapabilityProbeFailureMessage(capabilityProbe.failureKind, capabilityProbe.status)}`
+            : reusableOutputVerification
+              ? " 已复用已完成的输出能力测试。"
+              : ""}`
         : modelsResult.message,
       checkedAt: modelsResult.checkedAt,
       code: modelsResult.code
@@ -903,6 +1051,11 @@ export async function saveAiConnection(
         config: toUnsavedSummary(normalized),
         test: getSettingsFailure(error, checkedAt)
       };
+    }
+
+    rememberAiModelsVerification(normalized, resolution.apiKey, modelsResult);
+    if (outputCapability) {
+      rememberAiOutputVerification(normalized, resolution.apiKey, outputCapability);
     }
 
     return {
@@ -929,6 +1082,7 @@ export async function deleteAiConnection(petId: string): Promise<void> {
   }
 
   await runPetMutation(normalizedPetId, async () => {
+    clearAiVerificationCache(normalizedPetId);
     await migrateLegacyAiConnections();
     await runSettingsMutation(async () => {
       const settings = (await readSettingsFile()).settings;

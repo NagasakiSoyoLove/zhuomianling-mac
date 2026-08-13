@@ -64,6 +64,23 @@ export type AiOutputMode = "json-schema" | "json-object" | "prompt-json" | "plai
 export type AiProtocolTier = "full" | "text";
 export type AiOutputCapabilityConfidence = "tested" | "fallback";
 
+export type AiChatImageMimeType = "image/jpeg" | "image/png" | "image/webp";
+
+export function isAiChatImageMimeType(value: unknown): value is AiChatImageMimeType {
+  return value === "image/jpeg" || value === "image/png" || value === "image/webp";
+}
+
+export const AI_CHAT_LIMITS = Object.freeze({
+  maxContextMessages: 12,
+  maxImageBytes: 512 * 1024,
+  maxTotalImageBytes: 6 * 1024 * 1024
+});
+
+export interface AiChatImageAttachment {
+  data: Uint8Array;
+  mimeType: AiChatImageMimeType;
+}
+
 export interface AiOutputCapability {
   baseUrl: string;
   model: string;
@@ -128,6 +145,8 @@ export interface AiConnectionSaveResult {
 export interface AiChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  /** Optional screenshot attached to this exact conversation message. */
+  image?: AiChatImageAttachment;
 }
 
 export interface AiChatRequest {

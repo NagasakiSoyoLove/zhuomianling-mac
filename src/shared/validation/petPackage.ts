@@ -151,7 +151,6 @@ export function parsePortablePetDefinition(value: unknown): PortablePetDefinitio
   }
   const ui = portable.uiSettings === undefined ? undefined : record(portable.uiSettings, "uiSettings");
   if (ui?.desktopPosition !== undefined) throw new Error("便携配置不得包含桌面位置。");
-  if (ui && ui.theme !== "custom") delete ui.customTheme;
   if (ui?.theme === "custom" && !ui.customTheme) throw new Error("自定义主题缺少定义。");
   const voice = portable.voiceModelSettings === undefined ? undefined : record(portable.voiceModelSettings, "voiceModelSettings");
   if (voice && voice.connected !== false) throw new Error("便携语音配置运行状态无效。");
@@ -167,10 +166,9 @@ export function parsePortablePetDefinition(value: unknown): PortablePetDefinitio
 }
 
 export function createPortablePetDefinition(pet: PetDefinition, live2dEntry: string, voicePaths?: { sovitsModel: string; gptModel: string; referenceAudio: string }): PortablePetDefinitionV1 {
-  const { id: _id, modelPath: _modelPath, avatarImage: _avatarImage, memorySettings: _memory, voiceInputSettings: _voiceInput, isLocal: _local, ...rest } = pet;
+  const { id: _id, modelPath: _modelPath, avatarImage: _avatarImage, memorySettings: _memory, voiceInputSettings: _voiceInput, screenAwarenessSettings: _screenAwareness, isLocal: _local, ...rest } = pet;
   const uiSettings: PetDefinition["uiSettings"] = rest.uiSettings ? { ...rest.uiSettings } : undefined;
   if (uiSettings) delete uiSettings.desktopPosition;
-  if (uiSettings && uiSettings.theme !== "custom") delete uiSettings.customTheme;
   const sourceVoice = rest.voiceModelSettings;
   delete (rest as Partial<PetDefinition>).voiceModelSettings;
   const voiceModelSettings = sourceVoice ? {

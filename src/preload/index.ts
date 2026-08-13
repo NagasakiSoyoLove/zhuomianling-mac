@@ -96,14 +96,42 @@ import type {
   PetPackageImportVoiceRequest,
   PetPackageProgress
 } from "../shared/types/petPackage";
+import type {
+  ScreenAwarenessAvailability,
+  ScreenVisionConnectionDraft,
+  ScreenVisionConnectionSummary,
+  ScreenVisionModelListResult,
+  ScreenVisionProbeResult,
+  ScreenAwarenessMode
+} from "../shared/types/screen";
+import type {
+  TimedDiagnosticEvent,
+  TimedDiagnosticSnapshot
+} from "../shared/types/timedDiagnostics";
 
 const startupTimingEnabled = process.env.ZHUOMIANLING_STARTUP_TIMING === "1";
 
 const desktopPetApi = {
   getAppVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
+  // TIMED DIAGNOSTICS TEST MODULE: main-window-only development diagnostics.
+  timedDiagnosticsTest: {
+    getSnapshot: () =>
+      ipcRenderer.invoke("timed-diagnostics-test:get-snapshot") as Promise<TimedDiagnosticSnapshot>,
+    onEvent: (callback: (event: TimedDiagnosticEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, result: TimedDiagnosticEvent): void => {
+        callback(result);
+      };
+
+      ipcRenderer.on("timed-diagnostics-test:event", listener);
+      return () => {
+        ipcRenderer.off("timed-diagnostics-test:event", listener);
+      };
+    }
+  },
   minimize: () => ipcRenderer.send("window:minimize"),
   close: () => ipcRenderer.send("window:close"),
   appWindow: {
+    openLocalHelp: () => ipcRenderer.invoke("app:open-local-help") as Promise<{ ok: boolean; message?: string }>,
     isShown: () => ipcRenderer.invoke("app-window:is-shown") as Promise<boolean>,
     revealStartupSurface: (reason?: string) =>
       ipcRenderer.send("app-window:startup-surface-ready", reason),
@@ -227,6 +255,20 @@ const desktopPetApi = {
       ipcRenderer.invoke("ai-settings:test-output", draft) as Promise<AiOutputCapabilityTestResult>,
     save: (draft: AiConnectionDraft) =>
       ipcRenderer.invoke("ai-settings:save", draft) as Promise<AiConnectionSaveResult>
+  },
+  screenVision: {
+    getAvailability: (petId: string) =>
+      ipcRenderer.invoke("screen-vision:get-availability", petId) as Promise<ScreenAwarenessAvailability>,
+    testCurrent: (petId: string) =>
+      ipcRenderer.invoke("screen-vision:test-current", petId) as Promise<ScreenVisionProbeResult>,
+    listModels: (draft: ScreenVisionConnectionDraft) =>
+      ipcRenderer.invoke("screen-vision:list-models", draft) as Promise<ScreenVisionModelListResult>,
+    testIndependent: (draft: ScreenVisionConnectionDraft) =>
+      ipcRenderer.invoke("screen-vision:test-independent", draft) as Promise<ScreenVisionProbeResult>,
+    saveIndependent: (draft: ScreenVisionConnectionDraft) =>
+      ipcRenderer.invoke("screen-vision:save-independent", draft) as Promise<ScreenVisionConnectionSummary>,
+    saveSettings: (request: { petId: string; enabled: boolean; mode?: ScreenAwarenessMode; persistentCaptureEnabled?: boolean }) =>
+      ipcRenderer.invoke("screen-vision:save-settings", request) as Promise<LocalPetSaveResult>
   },
   petPackage: {
     inspectExport: (petId: string) => ipcRenderer.invoke("pet-package:inspect-export", petId) as Promise<PetPackageExportInspection>,

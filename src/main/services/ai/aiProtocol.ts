@@ -61,7 +61,7 @@ export function buildAiChatRequestBody(options: {
   const responseFormat = buildAiResponseFormat(options.mode, options.contract);
   return {
     model: options.model,
-    messages: options.messages,
+    messages: options.messages.map((message) => buildAiProviderMessage(message)),
     temperature: options.temperature ?? 0.8,
     max_tokens: options.maxTokens ?? 1200,
     ...(responseFormat ? { response_format: responseFormat } : {}),
@@ -85,4 +85,34 @@ export function getAiOutputModeFallbacks(mode: AiOutputMode): AiOutputMode[] {
 
 export function canFallbackAiOutputMode(status: number): boolean {
   return status === 400 || status === 404 || status === 415 || status === 422;
+}
+
+/**
+ * Converts the internal bounded message shape to the OpenAI-compatible
+ * multimodal message shape. The screenshot stays attached to its original
+ * message instead of becoming an unrelated prompt block.
+ */
+export function buildAiProviderMessage(
+  message: AiChatMessage,
+  textLimit?: number
+): Record<string, unknown> {
+  const content = textLimit === undefined
+    ? message.content
+    : message.content.slice(0, textLimit);
+  if (!message.image) {
+    return { role: message.role, content };
+  }
+
+  return {
+    role: message.role,
+    content: [
+      { type: "text", text: content },
+      {
+        type: "image_url",
+        image_url: {
+          url: `data:${message.image.mimeType};base64,${Buffer.from(message.image.data).toString("base64")}`
+        }
+      }
+    ]
+  };
 }

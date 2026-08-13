@@ -47,7 +47,16 @@ describe("pet package export allowlist", () => {
       id: "pet-a", name: "安全测试", description: "portable", modelPath: "pet-resource://local/pet-a/live2d/model.json", personaPrompt: "hello",
       avatar: "安", avatarImage: "pet-resource://local/pet-a/assets/avatar.png",
       capabilities: { chat: true, voiceOutput: false, subtitles: true }, details: { role: "r", personality: "p", scenes: [], features: [] },
-      uiSettings: { theme: "soft", customTheme: { id: "must-not-copy" } as never, desktopPosition: { x: 20, y: 30 } },
+      // TIMED DIAGNOSTICS TEST MODULE: screen-monitor settings must stay local.
+      screenAwarenessSettings: { enabled: true, mode: "companion" },
+      uiSettings: {
+        theme: "soft",
+        customTheme: {
+          id: "retained-theme", name: "Retained", description: "theme", version: 1,
+          tokens: { background: "#fff", surface: "#fff", text: "#111", mutedText: "#666", accent: "#08f", border: "#ddd" }
+        },
+        desktopPosition: { x: 20, y: 30 }
+      },
       memorySettings: { onboardingCompleted: true, recallEnabled: true, autoCaptureEnabled: true, retainSources: true, recallLimit: 6, contextBudgetChars: 4000 },
       voiceInputSettings: { provider: "tencent-asr", hasCredentials: true, connected: true, autoEndEnabled: true, silenceSeconds: 2, volumeThreshold: .1, continuousConversationEnabled: false }, isLocal: true
     };
@@ -66,10 +75,12 @@ describe("pet package export allowlist", () => {
     expect(allText).not.toContain("memorySettings");
     expect(allText).not.toContain("voiceInputSettings");
     expect(allText).not.toContain("desktopPosition");
-    expect(allText).not.toContain("must-not-copy");
+    expect(allText).not.toContain("screenAwarenessSettings");
+    expect(allText).toContain("retained-theme");
     const portable = JSON.parse(zip.get("pet.json")!.toString("utf8"));
     expect(portable.avatar).toBe("assets/avatar.png");
     expect(portable).not.toHaveProperty("avatarImage");
+    expect(portable.uiSettings).toMatchObject({ theme: "soft", customTheme: { id: "retained-theme" } });
     const manifest = JSON.parse(zip.get("manifest.json")!.toString("utf8"));
     expect(manifest.requirements).toEqual({ ai: true, gptSoVits: false });
   });

@@ -15,18 +15,35 @@ vi.mock("../config/petConfigStore", () => ({
 vi.mock("../ai/aiSettings", () => ({
   deleteAiConnection: vi.fn(), listAiModels: vi.fn(), saveAiConnection: vi.fn(), testAiOutputCapability: vi.fn()
 }));
+// TIMED DIAGNOSTICS TEST MODULE: screen-vision capability import coverage.
+vi.mock("../screen/ScreenVisionConnectionStore", () => ({
+  clearChatVisionCapability: vi.fn(), saveChatVisionCapability: vi.fn()
+}));
+vi.mock("../screen/ScreenVisionService", () => ({
+  testChatVisionDraft: vi.fn()
+}));
 vi.mock("../config/live2dImportService", () => ({ validateLive2DFolder: vi.fn() }));
 
 import { beginPetPackageImport, cancelPetPackageImport, cleanupInterruptedPetPackageImports, commitPetPackageImport, listPetPackageImportAiModels, testPetPackageImportAi, testPetPackageImportVoice } from "./petPackageImportService";
 import { validateLive2DFolder } from "../config/live2dImportService";
 import { listAiModels, saveAiConnection, testAiOutputCapability } from "../ai/aiSettings";
+import { clearChatVisionCapability, saveChatVisionCapability } from "../screen/ScreenVisionConnectionStore";
+import { testChatVisionDraft } from "../screen/ScreenVisionService";
 
-async function createValidPackage(filePath: string, options?: { disabledVoiceResources?: boolean; ai?: boolean }): Promise<void> {
+async function createValidPackage(filePath: string, options?: { disabledVoiceResources?: boolean; ai?: boolean; retainedTheme?: boolean }): Promise<void> {
   const disabledVoiceResources = options?.disabledVoiceResources === true;
   const portable = Buffer.from(`${JSON.stringify({
     schemaVersion: 1, live2dEntry: "live2d/model.json", name: "Imported", description: "ok", personaPrompt: "",
     avatar: "assets/avatar.png",
-    capabilities: { chat: false, voiceOutput: false, subtitles: true }, details: { role: "", personality: "", scenes: [], features: [] }, uiSettings: { theme: "soft" },
+    capabilities: { chat: false, voiceOutput: false, subtitles: true }, details: { role: "", personality: "", scenes: [], features: [] }, uiSettings: {
+      theme: "soft",
+      ...(options?.retainedTheme ? {
+        customTheme: {
+          id: "retained-theme", name: "Retained", description: "theme", version: 1,
+          tokens: { background: "#fff", surface: "#fff", text: "#111", mutedText: "#666", accent: "#08f", border: "#ddd" }
+        }
+      } : {})
+    },
     ...(disabledVoiceResources ? { voiceModelSettings: {
       enabled: false, connected: false, modelVersion: "v2ProPlus", referenceText: "测试",
       referenceLanguage: "zh", language: "zh", playMode: "sentence",
@@ -97,9 +114,11 @@ describe("pet package import staging safety", () => {
     expect(committed.pet?.id).toBe("imported");
     expect(committed.pet?.modelPath).toBe("pet-resource://local/imported/live2d/model.json");
     expect(committed.pet?.avatarImage).toBe("pet-resource://local/imported/assets/avatar.png");
+    expect(committed.pet?.screenAwarenessSettings).toBeUndefined();
     const stored = JSON.parse(await fs.readFile(path.join(userData, "pets", "imported", "pet.local.json"), "utf8"));
     expect(stored.modelPath).toBe("pet-resource://local/imported/live2d/model.json");
     expect(stored.avatarImage).toBe("pet-resource://local/imported/assets/avatar.png");
+    expect(stored).not.toHaveProperty("screenAwarenessSettings");
     await expect(fs.access(path.join(userData, "pets", "imported", "pet.json"))).rejects.toThrow();
   });
 
@@ -111,6 +130,22 @@ describe("pet package import staging safety", () => {
     expect(begun.ok, begun.message).toBe(true);
     expect(begun.requirements?.gptSoVits).toBe(true);
     await cancelPetPackageImport(begun.sessionId, 9);
+  });
+
+  it("imports a retained custom theme alongside an active built-in theme", async () => {
+    vi.mocked(validateLive2DFolder).mockResolvedValue({ ok: true, message: "ok", entryRelativePath: "model.json", checks: [], missingFiles: [], textureCount: 0, motionCount: 0, expressionCount: 0 });
+    const input = path.join(userData, "retained-theme.zmling");
+    await createValidPackage(input, { retainedTheme: true });
+    const begun = await beginPetPackageImport(input, 13);
+    expect(begun.ok, begun.message).toBe(true);
+    expect(begun.contents?.customTheme).toBe(true);
+    const committed = await commitPetPackageImport(begun.sessionId!, 13);
+    expect(committed.ok, committed.message).toBe(true);
+    expect(committed.pet?.uiSettings).toMatchObject({
+      theme: "soft",
+      customTheme: { id: "retained-theme" }
+    });
+    await expect(fs.access(path.join(userData, "pets", "imported", "pet.local.json"))).resolves.toBeUndefined();
   });
 
   it("rejects an arbitrary folder selected as the GPT-SoVITS root", async () => {
@@ -151,6 +186,24 @@ describe("pet package import staging safety", () => {
       checkedAt,
       capability: { baseUrl: "https://api.example.com/v1", model: "model-a", mode: "json-schema", protocolTier: "full", streaming: true, confidence: "tested", checkedAt, probeVersion: 2 }
     });
+    vi.mocked(testChatVisionDraft).mockResolvedValue({
+      ok: true,
+      message: "vision-ok",
+      checkedAt,
+      state: "tested",
+      capability: {
+        visionInput: "tested",
+        checkedAt,
+        fingerprint: {
+          normalizedBaseUrl: "https://api.example.com/v1",
+          model: "model-a",
+          providerProtocol: "openai-compatible",
+          visionInputFormat: "image_url-data-url",
+          probeVersion: 1
+        },
+        probeVersion: 1
+      }
+    });
     vi.mocked(saveAiConnection).mockResolvedValue({
       config: { petId: "imported", providerName: "OpenAI Compatible", baseUrl: "https://api.example.com/v1", model: "model-a", models: [{ id: "model-a", name: "Model A" }], hasApiKey: true },
       test: { ok: true, message: "saved", checkedAt }
@@ -175,5 +228,14 @@ describe("pet package import staging safety", () => {
         outputCapability: expect.objectContaining({ mode: "json-schema", confidence: "tested" })
       })
     );
+    expect(vi.mocked(testChatVisionDraft)).toHaveBeenCalledWith(
+      expect.objectContaining({ petId: "imported", model: "model-a", apiKey: "secret" }),
+      expect.any(AbortSignal)
+    );
+    expect(vi.mocked(saveChatVisionCapability)).toHaveBeenCalledWith(
+      "imported",
+      expect.objectContaining({ visionInput: "tested", fingerprint: expect.objectContaining({ model: "model-a" }) })
+    );
+    expect(vi.mocked(clearChatVisionCapability)).not.toHaveBeenCalled();
   });
 });

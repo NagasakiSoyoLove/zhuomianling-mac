@@ -1256,10 +1256,29 @@ textarea {
 .petRadialMenuLayer {
   position: absolute;
   inset: 0;
-  z-index: 9;
+  /* The menu is the active interaction surface and must sit above optional
+     status overlays such as the screen-monitor chip. */
+  z-index: 100;
   pointer-events: auto;
   -webkit-app-region: no-drag;
   app-region: no-drag;
+}
+
+/* In click-through mode only the unlock button may temporarily receive input.
+   The layer itself must never turn the transparent window into a hit target. */
+.petWindowShell.clickThroughMode .petRadialMenuLayer {
+  pointer-events: none;
+}
+
+.petWindowShell.clickThroughMode .petRadialMenuLayer .petRadialButton.passThrough {
+  pointer-events: auto;
+}
+
+.petWindowShell.clickThroughMode .petRadialMenuLayer.clickThroughControlHidden .petRadialButton.passThrough {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  animation: none;
 }
 
 .petRadialMenu {
@@ -2690,4 +2709,875 @@ textarea {
   .moodBoundary,
   .moodCapsule,
   .moodCapsule i { animation: none; }
+}
+
+/* Screen observation shares one layout, while each theme owns its material and state colors. */
+.screenMonitorPopover,
+.screenMonitorStatusChip,
+.screenMonitorDebugPanel {
+  --screen-monitor-surface: rgba(255, 255, 255, 0.92);
+  --screen-monitor-surface-raised: rgba(255, 255, 255, 0.72);
+  --screen-monitor-text: var(--pet-ink);
+  --screen-monitor-muted: var(--pet-muted);
+  --screen-monitor-accent: var(--pet-accent);
+  --screen-monitor-accent-soft: rgba(36, 104, 216, 0.12);
+  --screen-monitor-border: var(--pet-line);
+  --screen-monitor-shadow: var(--pet-shadow);
+  --screen-monitor-danger: #b42318;
+}
+
+.screenMonitorPopover {
+  position: fixed;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  width: min(286px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: hidden;
+  border: 1px solid var(--screen-monitor-border);
+  border-radius: 16px;
+  padding: 10px;
+  color: var(--screen-monitor-text);
+  background: var(--screen-monitor-surface);
+  box-shadow: var(--screen-monitor-shadow);
+  backdrop-filter: blur(24px) saturate(170%);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  pointer-events: auto;
+  overscroll-behavior: contain;
+}
+
+.screenMonitorPopoverHeader,
+.screenMonitorSourceHeading,
+.screenMonitorPopoverActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.screenMonitorPopoverHeader {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 2px 7px;
+  border-bottom: 1px solid color-mix(in srgb, var(--screen-monitor-border) 70%, transparent);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.screenMonitorPopoverHeader > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.screenMonitorPopoverHeader > span svg {
+  color: var(--screen-monitor-accent);
+}
+
+.screenMonitorPopoverHeader button,
+.screenMonitorRefreshButton {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--screen-monitor-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.screenMonitorPopoverHeader button:hover,
+.screenMonitorPopoverHeader button:focus-visible,
+.screenMonitorRefreshButton:hover,
+.screenMonitorRefreshButton:focus-visible {
+  border-color: var(--screen-monitor-border);
+  color: var(--screen-monitor-accent);
+  background: var(--screen-monitor-accent-soft);
+  outline: none;
+}
+
+.screenMonitorPopoverBody {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  gap: 9px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-top: 9px;
+}
+
+.screenMonitorSourceHeading,
+.screenMonitorModeBlock > span {
+  color: var(--screen-monitor-muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.screenMonitorSourceFilters,
+.screenMonitorModeButtons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.screenMonitorSourceFilters button,
+.screenMonitorModeButtons button,
+.screenMonitorPrimaryAction {
+  min-height: 31px;
+  border: 1px solid var(--screen-monitor-border);
+  border-radius: 9px;
+  color: var(--screen-monitor-text);
+  background: var(--screen-monitor-surface-raised);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 900;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.screenMonitorSourceFilters button:hover,
+.screenMonitorSourceFilters button:focus-visible,
+.screenMonitorModeButtons button:hover,
+.screenMonitorModeButtons button:focus-visible {
+  border-color: var(--screen-monitor-accent);
+  color: var(--screen-monitor-accent);
+  background: var(--screen-monitor-accent-soft);
+  outline: none;
+}
+
+.screenMonitorSourceFilters button.selected,
+.screenMonitorModeButtons button.selected {
+  border-color: var(--screen-monitor-accent);
+  color: var(--screen-monitor-accent);
+  background: var(--screen-monitor-accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--screen-monitor-accent) 18%, transparent);
+}
+
+.screenMonitorSourceList {
+  display: grid;
+  gap: 5px;
+  max-height: 104px;
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid color-mix(in srgb, var(--screen-monitor-border) 78%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--screen-monitor-surface-raised) 72%, transparent);
+}
+
+.screenMonitorSource {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 4px 6px;
+  color: var(--screen-monitor-text);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.screenMonitorSource:hover,
+.screenMonitorSource:focus-visible,
+.screenMonitorSource.selected {
+  border-color: var(--screen-monitor-accent);
+  background: var(--screen-monitor-accent-soft);
+  outline: none;
+}
+
+.screenMonitorSource > span {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screenMonitorSource > small {
+  color: var(--screen-monitor-muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.screenMonitorSource > svg {
+  color: var(--screen-monitor-accent);
+}
+
+.screenMonitorEmpty,
+.screenMonitorError {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.screenMonitorEmpty {
+  padding: 7px 4px;
+  color: var(--screen-monitor-muted);
+  text-align: center;
+}
+
+.screenMonitorModeBlock {
+  display: grid;
+  gap: 6px;
+}
+
+.screenMonitorModeButtons button {
+  display: grid;
+  gap: 2px;
+  min-height: 46px;
+  padding: 5px 6px;
+  text-align: left;
+}
+
+.screenMonitorModeButtons strong {
+  font-size: 11px;
+}
+
+.screenMonitorModeButtons small {
+  color: var(--screen-monitor-muted);
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.screenMonitorError {
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--screen-monitor-danger) 32%, transparent);
+  border-radius: 8px;
+  color: var(--screen-monitor-danger);
+  background: color-mix(in srgb, var(--screen-monitor-danger) 8%, transparent);
+}
+
+.screenMonitorPopoverActions {
+  justify-content: flex-end;
+  padding-top: 1px;
+}
+
+.screenMonitorPrimaryAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 11px;
+}
+
+.screenMonitorPrimaryAction {
+  border-color: var(--screen-monitor-accent);
+  color: #fff;
+  background: var(--screen-monitor-accent);
+  box-shadow: 0 7px 14px color-mix(in srgb, var(--screen-monitor-accent) 22%, transparent);
+}
+
+.screenMonitorPrimaryAction:hover,
+.screenMonitorPrimaryAction:focus-visible {
+  filter: brightness(1.08) saturate(1.05);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.screenMonitorSpinner {
+  display: block;
+  transform-origin: center;
+  animation: screenMonitorSpin 800ms linear infinite;
+}
+
+@keyframes screenMonitorSpin {
+  to { transform: rotate(360deg); }
+}
+
+.screenMonitorPopover button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.screenMonitorPopover.busy .screenMonitorSourceList {
+  opacity: 0.78;
+}
+
+.screenMonitorStatusChip {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 88;
+  display: inline-flex;
+  max-width: calc(100% - 24px);
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  border: 1px solid var(--screen-monitor-border);
+  border-radius: 999px;
+  padding: 4px 5px 4px 9px;
+  color: var(--screen-monitor-text);
+  background: var(--screen-monitor-surface);
+  box-shadow: var(--screen-monitor-shadow);
+  backdrop-filter: blur(18px) saturate(170%);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  font-size: 11px;
+  font-weight: 900;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.screenMonitorStatusChip.dragging {
+  cursor: grabbing;
+}
+
+.screenMonitorStatusIcon {
+  color: var(--screen-monitor-accent);
+}
+
+.screenMonitorStatusChip.analyzing .screenMonitorStatusIcon,
+.screenMonitorStatusChip.retrying .screenMonitorStatusIcon {
+  display: block;
+  transform-origin: center;
+  animation: screenMonitorSpin 800ms linear infinite;
+  color: var(--screen-monitor-accent);
+  filter: drop-shadow(0 0 4px var(--screen-monitor-accent));
+}
+
+.screenMonitorStatusChip button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 21px;
+  border: 1px solid var(--screen-monitor-border);
+  border-radius: 999px;
+  padding: 0 7px;
+  color: var(--screen-monitor-danger);
+  background: var(--screen-monitor-surface-raised);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.screenMonitorStatusChip button:hover,
+.screenMonitorStatusChip button:focus-visible {
+  border-color: var(--screen-monitor-danger);
+  background: color-mix(in srgb, var(--screen-monitor-danger) 10%, transparent);
+  outline: none;
+}
+
+.screenMonitorStatusChip .screenMonitorDebugToggle {
+  display: grid;
+  width: 21px;
+  min-height: 21px;
+  place-items: center;
+  border-color: var(--screen-monitor-border);
+  padding: 0;
+  color: var(--screen-monitor-accent);
+  background: var(--screen-monitor-surface-raised);
+}
+
+.screenMonitorStatusChip .screenMonitorDebugToggle:hover,
+.screenMonitorStatusChip .screenMonitorDebugToggle:focus-visible {
+  border-color: var(--screen-monitor-accent);
+  color: var(--screen-monitor-accent);
+  background: var(--screen-monitor-accent-soft);
+}
+
+.screenMonitorDebugPanel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 2;
+  display: flex;
+  width: min(270px, calc(100vw - 16px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--screen-monitor-border);
+  border-radius: 13px;
+  color: var(--screen-monitor-text);
+  background: var(--screen-monitor-surface);
+  box-shadow: var(--screen-monitor-shadow);
+  backdrop-filter: blur(22px) saturate(170%);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  cursor: default;
+  pointer-events: auto;
+  text-align: left;
+  user-select: text;
+}
+
+.screenMonitorDebugHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 31px;
+  padding: 0 7px 0 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--screen-monitor-border) 70%, transparent);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.screenMonitorDebugHeader > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.screenMonitorDebugHeader > span svg {
+  color: var(--screen-monitor-accent);
+}
+
+.screenMonitorDebugHeader small {
+  border: 1px solid color-mix(in srgb, var(--screen-monitor-accent) 38%, transparent);
+  border-radius: 4px;
+  padding: 1px 4px;
+  color: var(--screen-monitor-accent);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+.screenMonitorDebugHeader button {
+  display: grid;
+  width: 23px;
+  min-height: 23px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 0;
+  color: var(--screen-monitor-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.screenMonitorDebugHeader button:hover,
+.screenMonitorDebugHeader button:focus-visible {
+  border-color: var(--screen-monitor-border);
+  color: var(--screen-monitor-accent);
+  background: var(--screen-monitor-accent-soft);
+  outline: none;
+}
+
+.screenMonitorDebugBody {
+  display: grid;
+  gap: 6px;
+  padding: 9px 10px 10px;
+}
+
+.screenMonitorDebugStatus,
+.screenMonitorDebugLatest,
+.screenMonitorDebugMeta,
+.screenMonitorDebugNote {
+  margin: 0;
+}
+
+.screenMonitorDebugStatus {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--screen-monitor-accent);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.screenMonitorDebugStatus i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 13%, transparent);
+}
+
+.screenMonitorDebugLatest {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screenMonitorDebugMeta {
+  color: var(--screen-monitor-muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.screenMonitorDebugMetrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.screenMonitorDebugMetrics span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--screen-monitor-border) 70%, transparent);
+  border-radius: 7px;
+  padding: 4px 6px;
+  color: var(--screen-monitor-muted);
+  background: color-mix(in srgb, var(--screen-monitor-surface-raised) 76%, transparent);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.screenMonitorDebugMetrics strong {
+  color: var(--screen-monitor-text);
+  font-size: 12px;
+}
+
+.screenMonitorDebugNote {
+  color: var(--screen-monitor-muted);
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+/* Soft: translucent candy glass with a cool aqua visual accent. */
+.screenMonitorPopover.theme-soft,
+.screenMonitorStatusChip.theme-soft {
+  --screen-monitor-surface: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(239, 250, 255, 0.78));
+  --screen-monitor-surface-raised: rgba(255, 255, 255, 0.66);
+  --screen-monitor-text: #27445f;
+  --screen-monitor-muted: #6f8397;
+  --screen-monitor-accent: #2b9db0;
+  --screen-monitor-accent-soft: rgba(78, 194, 204, 0.15);
+  --screen-monitor-border: rgba(93, 184, 202, 0.42);
+  --screen-monitor-shadow: 0 14px 30px rgba(70, 115, 142, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+.screenMonitorPopover.theme-soft::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: radial-gradient(circle at 88% 5%, rgba(255, 189, 225, 0.3), transparent 32%);
+  content: "";
+  pointer-events: none;
+}
+
+/* Rock: dark stage glass with yellow edges and red warning states. */
+.screenMonitorPopover.theme-rock,
+.screenMonitorStatusChip.theme-rock {
+  --screen-monitor-surface: linear-gradient(145deg, rgba(39, 39, 45, 0.97), rgba(8, 9, 12, 0.98));
+  --screen-monitor-surface-raised: rgba(255, 255, 255, 0.08);
+  --screen-monitor-text: #fff7a8;
+  --screen-monitor-muted: #c7bd82;
+  --screen-monitor-accent: #ffe666;
+  --screen-monitor-accent-soft: rgba(255, 230, 102, 0.12);
+  --screen-monitor-border: rgba(255, 230, 102, 0.6);
+  --screen-monitor-shadow: 0 15px 28px rgba(0, 0, 0, 0.48), 0 0 0 2px rgba(12, 12, 15, 0.62), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --screen-monitor-danger: #ff395c;
+}
+
+.screenMonitorPopover.theme-rock,
+.screenMonitorStatusChip.theme-rock,
+.screenMonitorPopover.theme-rock button,
+.screenMonitorStatusChip.theme-rock button {
+  border-radius: 5px;
+}
+
+.screenMonitorPopover.theme-rock .screenMonitorPrimaryAction {
+  color: #171014;
+  background: linear-gradient(145deg, #ffe666, #ff395c);
+}
+
+/* Pixel: hard edges, offset shadow and high-contrast game UI. */
+.screenMonitorPopover.theme-pixel,
+.screenMonitorStatusChip.theme-pixel {
+  --screen-monitor-surface: #fff;
+  --screen-monitor-surface-raised: #eff6ff;
+  --screen-monitor-text: #111827;
+  --screen-monitor-muted: #46566d;
+  --screen-monitor-accent: #2563eb;
+  --screen-monitor-accent-soft: rgba(37, 99, 235, 0.12);
+  --screen-monitor-border: #111827;
+  --screen-monitor-shadow: 5px 5px 0 rgba(17, 24, 39, 0.32);
+  --screen-monitor-danger: #dc2626;
+}
+
+.screenMonitorPopover.theme-pixel,
+.screenMonitorStatusChip.theme-pixel,
+.screenMonitorPopover.theme-pixel button,
+.screenMonitorStatusChip.theme-pixel button {
+  border-radius: 0;
+}
+
+.screenMonitorPopover.theme-pixel button,
+.screenMonitorStatusChip.theme-pixel button {
+  border-width: 2px;
+  font-family: "Consolas", "Microsoft YaHei", monospace;
+}
+
+.screenMonitorPopover.theme-pixel .screenMonitorPrimaryAction {
+  color: #fef08a;
+  background: #2563eb;
+  box-shadow: 3px 3px 0 rgba(17, 24, 39, 0.52);
+}
+
+/* Journal: warm paper, ink borders and a small sticker-like accent. */
+.screenMonitorPopover.theme-journal,
+.screenMonitorStatusChip.theme-journal {
+  --screen-monitor-surface: #fffaf0;
+  --screen-monitor-surface-raised: rgba(255, 255, 255, 0.7);
+  --screen-monitor-text: #70452f;
+  --screen-monitor-muted: #956f59;
+  --screen-monitor-accent: #c56d4f;
+  --screen-monitor-accent-soft: rgba(197, 109, 79, 0.12);
+  --screen-monitor-border: rgba(130, 92, 54, 0.32);
+  --screen-monitor-shadow: 0 12px 24px rgba(130, 92, 54, 0.2), 3px 3px 0 rgba(216, 164, 119, 0.14);
+  --screen-monitor-danger: #b84d5c;
+}
+
+.screenMonitorPopover.theme-journal .screenMonitorPrimaryAction {
+  color: #fffaf0;
+  background: #c56d4f;
+}
+
+/* Cyber: neon information panel with cyan/purple glow. */
+.screenMonitorPopover.theme-cyber,
+.screenMonitorStatusChip.theme-cyber {
+  --screen-monitor-surface: linear-gradient(145deg, rgba(8, 13, 27, 0.98), rgba(19, 11, 40, 0.98));
+  --screen-monitor-surface-raised: rgba(34, 211, 238, 0.08);
+  --screen-monitor-text: #c9fbff;
+  --screen-monitor-muted: #79bfd0;
+  --screen-monitor-accent: #22d3ee;
+  --screen-monitor-accent-soft: rgba(34, 211, 238, 0.12);
+  --screen-monitor-border: rgba(34, 211, 238, 0.7);
+  --screen-monitor-shadow: 0 0 22px rgba(34, 211, 238, 0.22), inset 0 0 16px rgba(217, 70, 239, 0.12);
+  --screen-monitor-danger: #f472b6;
+}
+
+.screenMonitorPopover.theme-cyber .screenMonitorPrimaryAction {
+  color: #07111d;
+  background: linear-gradient(135deg, #22d3ee, #d946ef);
+}
+
+.screenMonitorPopover.theme-cyber .screenMonitorPopoverHeader,
+.screenMonitorPopover.theme-cyber .screenMonitorSourceList {
+  box-shadow: inset 0 0 12px rgba(34, 211, 238, 0.08);
+}
+
+/* Minimal: black-and-white utility surface. */
+.screenMonitorPopover.theme-minimal,
+.screenMonitorStatusChip.theme-minimal {
+  --screen-monitor-surface: #fff;
+  --screen-monitor-surface-raised: #f8fafc;
+  --screen-monitor-text: #111827;
+  --screen-monitor-muted: #4b5563;
+  --screen-monitor-accent: #111827;
+  --screen-monitor-accent-soft: #f1f5f9;
+  --screen-monitor-border: #111827;
+  --screen-monitor-shadow: none;
+  --screen-monitor-danger: #b91c1c;
+}
+
+.screenMonitorPopover.theme-minimal,
+.screenMonitorStatusChip.theme-minimal,
+.screenMonitorPopover.theme-minimal button,
+.screenMonitorStatusChip.theme-minimal button {
+  border-radius: 0;
+}
+
+.screenMonitorPopover.theme-minimal .screenMonitorPrimaryAction {
+  color: #fff;
+  background: #111827;
+  box-shadow: none;
+}
+
+/* Custom: reuse validated app-owned tokens; missing visual tokens fall back to menu tokens. */
+.screenMonitorPopover.theme-custom,
+.screenMonitorStatusChip.theme-custom {
+  --screen-monitor-surface: var(--custom-theme-surface, var(--custom-menu-surface, rgba(255, 255, 255, 0.92)));
+  --screen-monitor-surface-raised: var(--custom-theme-pet-surface, var(--custom-menu-surface, rgba(255, 255, 255, 0.72)));
+  --screen-monitor-text: var(--custom-theme-text, var(--custom-menu-text, #17202a));
+  --screen-monitor-muted: var(--custom-theme-muted, var(--custom-theme-text, #607080));
+  --screen-monitor-accent: var(--custom-theme-accent, var(--custom-menu-vision-text, #2684ff));
+  --screen-monitor-accent-soft: color-mix(in srgb, var(--screen-monitor-accent) 13%, transparent);
+  --screen-monitor-border: var(--custom-theme-border, var(--custom-menu-border, rgba(38, 132, 255, 0.28)));
+  --screen-monitor-shadow: var(--custom-theme-shadow, var(--custom-menu-shadow, none));
+  --screen-monitor-danger: var(--custom-theme-danger, #ef4444);
+}
+
+.screenMonitorPopover.theme-custom .screenMonitorPrimaryAction {
+  color: var(--custom-menu-vision-text, var(--custom-theme-surface, #fff));
+  background: var(--custom-menu-vision-surface, var(--custom-theme-accent, #2684ff));
+  border-color: var(--custom-menu-vision-border, var(--custom-theme-border, #2684ff));
+}
+
+/* The sixth radial action has a separate branch in every preset theme. */
+.petRadialButton.vision {
+  border-color: rgba(34, 211, 238, 0.62);
+  color: #075e72;
+  background:
+    radial-gradient(circle at 32% 17%, rgba(255, 255, 255, 0.86), transparent 32%),
+    linear-gradient(145deg, #c7f4f4, #63b8d0);
+}
+
+.petRadialButton.vision:hover,
+.petRadialButton.vision:focus-visible {
+  border-color: #168da5;
+  outline: none;
+  filter: brightness(1.08) saturate(1.08);
+}
+
+.petRadialButton.vision.active {
+  outline-color: #168da5;
+  box-shadow: 0 0 0 4px rgba(22, 141, 165, 0.2), 0 13px 25px rgba(22, 141, 165, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.84);
+}
+
+.petRadialMenu.variant-soft .petRadialButton.vision {
+  border-color: rgba(82, 180, 195, 0.6);
+  color: #176879;
+  background: radial-gradient(circle at 28% 15%, #fff, transparent 35%), linear-gradient(145deg, #c9f4f0, #82c9d6);
+}
+.petRadialMenu.variant-soft .petRadialButton.vision:hover,
+.petRadialMenu.variant-soft .petRadialButton.vision:focus-visible { border-color: #2b9db0; box-shadow: 0 0 0 4px rgba(43, 157, 176, 0.18), 0 14px 26px rgba(70, 115, 142, 0.2); }
+.petRadialMenu.variant-soft .petRadialButton.vision.active { outline-color: #2b9db0; }
+
+.petRadialMenu.variant-rock .petRadialButton.vision {
+  border-color: rgba(34, 211, 238, 0.8);
+  color: #a5f3fc;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), transparent 28%), linear-gradient(145deg, #164e63, #082f49 52%, #07121f);
+  text-shadow: 0 0 6px rgba(34, 211, 238, 0.7);
+}
+.petRadialMenu.variant-rock .petRadialButton.vision:hover,
+.petRadialMenu.variant-rock .petRadialButton.vision:focus-visible { border-color: #ffe666; box-shadow: 0 0 0 2px rgba(255, 230, 102, 0.28), 0 0 18px rgba(34, 211, 238, 0.42); }
+.petRadialMenu.variant-rock .petRadialButton.vision.active { outline-color: #22d3ee; box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.22), 0 0 20px rgba(34, 211, 238, 0.48); }
+
+.petRadialMenu.variant-pixel .petRadialButton.vision {
+  border: 2px solid #111827;
+  border-radius: 0;
+  color: #fef08a;
+  background: #0891b2;
+  box-shadow: 5px 5px 0 rgba(15, 23, 42, 0.34);
+}
+.petRadialMenu.variant-pixel .petRadialButton.vision:hover,
+.petRadialMenu.variant-pixel .petRadialButton.vision:focus-visible { background: #0e7490; outline: none; box-shadow: 3px 3px 0 rgba(15, 23, 42, 0.48); }
+.petRadialMenu.variant-pixel .petRadialButton.vision.active { outline: 2px solid #fef08a; outline-offset: -6px; }
+
+.petRadialMenu.variant-journal .petRadialButton.vision {
+  border-color: rgba(130, 92, 54, 0.36);
+  color: #356a73;
+  background: #d7f4ef;
+  box-shadow: 0 8px 0 rgba(130, 92, 54, 0.12);
+}
+.petRadialMenu.variant-journal .petRadialButton.vision:hover,
+.petRadialMenu.variant-journal .petRadialButton.vision:focus-visible { border-color: #356a73; background: #bde9df; outline: none; }
+.petRadialMenu.variant-journal .petRadialButton.vision.active { outline-color: #356a73; }
+
+.petRadialMenu.variant-cyber .petRadialButton.vision {
+  border-color: rgba(34, 211, 238, 0.82);
+  color: #67e8f9;
+  background: linear-gradient(145deg, rgba(34, 211, 238, 0.34), rgba(217, 70, 239, 0.24));
+  text-shadow: 0 0 7px rgba(34, 211, 238, 0.7);
+  box-shadow: 0 0 16px rgba(34, 211, 238, 0.28), inset 0 0 13px rgba(217, 70, 239, 0.18);
+}
+.petRadialMenu.variant-cyber .petRadialButton.vision:hover,
+.petRadialMenu.variant-cyber .petRadialButton.vision:focus-visible { border-color: #d946ef; outline: none; box-shadow: 0 0 22px rgba(217, 70, 239, 0.42), inset 0 0 16px rgba(34, 211, 238, 0.22); }
+.petRadialMenu.variant-cyber .petRadialButton.vision.active { outline-color: #22d3ee; box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.2), 0 0 22px rgba(34, 211, 238, 0.48); }
+
+.petRadialMenu.variant-minimal .petRadialButton.vision {
+  border: 1.5px solid #111827;
+  border-radius: 0;
+  color: #111827;
+  background: #fff;
+  text-shadow: none;
+  box-shadow: none;
+}
+.petRadialMenu.variant-minimal .petRadialButton.vision:hover,
+.petRadialMenu.variant-minimal .petRadialButton.vision:focus-visible,
+.petRadialMenu.variant-minimal .petRadialButton.vision.active { color: #fff; background: #111827; outline: none; }
+
+.petRadialMenu.variant-custom .petRadialButton.vision {
+  border-color: var(--custom-menu-vision-border, var(--custom-menu-border));
+  color: var(--custom-menu-vision-text, var(--custom-menu-text));
+  background: var(--custom-menu-vision-surface, var(--custom-menu-surface));
+}
+.petRadialMenu.variant-custom .petRadialButton.vision:hover,
+.petRadialMenu.variant-custom .petRadialButton.vision:focus-visible,
+.petRadialMenu.variant-custom .petRadialButton.vision.active {
+  border-color: var(--custom-menu-active-border, var(--custom-menu-vision-border, var(--custom-menu-border)));
+  outline: none;
+  box-shadow: var(--custom-menu-shadow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screenMonitorPopover button,
+  .screenMonitorStatusChip button,
+  .petRadialButton.vision {
+    transition: none;
+  }
+}
+
+/* Semantic reply states: amber means bounded fallback/degraded observation;
+   red remains reserved for an actual request or playback error. */
+.petWindowShell {
+  --pet-fallback-text: #8a4b08;
+  --pet-fallback-surface: #fff7e0;
+  --pet-fallback-border: #d99a1f;
+  --pet-fallback-tail: #fff7e0;
+  --pet-fallback-shadow: 0 8px 18px rgba(166, 101, 0, 0.12);
+  --pet-error-text: #b42318;
+  --pet-error-surface: #fff1f0;
+  --pet-error-border: #ef9a9a;
+}
+
+.theme-rock,
+.theme-cyber {
+  --pet-fallback-text: #f6d681;
+  --pet-fallback-surface: rgba(88, 57, 12, 0.88);
+  --pet-fallback-border: rgba(245, 190, 75, 0.86);
+  --pet-fallback-tail: rgba(88, 57, 12, 0.88);
+  --pet-fallback-shadow: 0 0 14px rgba(245, 190, 75, 0.16);
+  --pet-error-text: #ffd6df;
+  --pet-error-surface: rgba(75, 8, 22, 0.88);
+  --pet-error-border: rgba(255, 80, 112, 0.52);
+}
+
+.theme-custom {
+  --pet-fallback-text: color-mix(in srgb, #b45309 78%, var(--custom-theme-text, #17202a));
+  --pet-fallback-surface: color-mix(in srgb, #fef3c7 84%, var(--custom-theme-pet-surface, #fff));
+  --pet-fallback-border: color-mix(in srgb, #d97706 58%, var(--custom-theme-border, #d97706));
+  --pet-fallback-tail: var(--pet-fallback-surface);
+  --pet-fallback-shadow: var(--custom-theme-shadow, none);
+}
+
+.petChatMessage.pet.fallback {
+  border-color: var(--pet-fallback-border);
+  background: var(--pet-fallback-surface);
+  color: var(--pet-fallback-text);
+  box-shadow: var(--pet-fallback-shadow);
+}
+
+.petSubtitleBubble.fallback {
+  border-color: var(--pet-fallback-border);
+  background: var(--pet-fallback-surface);
+  color: var(--pet-fallback-text);
+  text-shadow: none;
+  box-shadow: var(--pet-fallback-shadow);
+}
+
+.petSubtitleBubble.fallback::before {
+  border-right-color: var(--pet-fallback-border);
+}
+
+.petSubtitleBubble.fallback::after {
+  border-right-color: var(--pet-fallback-tail);
+}
+
+.petChatMessage.pet.error,
+.petSubtitleBubble.system {
+  border-color: var(--pet-error-border);
+  background: var(--pet-error-surface);
+  color: var(--pet-error-text);
+  text-shadow: none;
+}
+
+.petSubtitleBubble.system::before {
+  border-right-color: var(--pet-error-border);
+}
+
+.petSubtitleBubble.system::after {
+  border-right-color: var(--pet-error-surface);
 }

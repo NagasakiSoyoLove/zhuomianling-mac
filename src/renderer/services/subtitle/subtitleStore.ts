@@ -3,6 +3,12 @@ import type { PetSubtitleTone } from "../../../shared/types/pet";
 
 export type SubtitleDisplayMode = "instant" | "typewriter";
 
+/**
+ * TIMED DIAGNOSTICS TEST MODULE: automatic-event subtitles may not cover an
+ * active conversation reply.
+ */
+export type SubtitlePresentationKind = "event" | "conversation" | "fallback" | "system";
+
 export interface SubtitleRequest {
   text: string;
   mode?: SubtitleDisplayMode;
@@ -10,6 +16,7 @@ export interface SubtitleRequest {
   charDelayMs?: number;
   tone?: PetSubtitleTone;
   maxWidth?: number;
+  kind?: SubtitlePresentationKind;
 }
 
 export interface SubtitleProgressRequest {
@@ -17,6 +24,7 @@ export interface SubtitleProgressRequest {
   fullText: string;
   tone?: PetSubtitleTone;
   maxWidth?: number;
+  kind?: SubtitlePresentationKind;
 }
 
 export interface SubtitleState {
@@ -26,6 +34,7 @@ export interface SubtitleState {
   tone: PetSubtitleTone;
   maxWidth?: number;
   isTyping: boolean;
+  kind: SubtitlePresentationKind;
 }
 
 type Listener = () => void;
@@ -35,10 +44,11 @@ const defaultState: SubtitleState = {
   text: "",
   fullText: "",
   tone: "soft",
-  isTyping: false
+  isTyping: false,
+  kind: "event"
 };
 
-function createSubtitleStore() {
+export function createSubtitleStore() {
   let state = defaultState;
   let typingTimer: number | undefined;
   let hideTimer: number | undefined;
@@ -55,6 +65,9 @@ function createSubtitleStore() {
     state = nextState;
     emit();
   };
+
+  const canReplace = (kind: SubtitlePresentationKind): boolean =>
+    !(state.visible && (state.kind === "conversation" || state.kind === "fallback") && kind === "event");
 
   const clearTimers = (): void => {
     window.clearTimeout(typingTimer);
@@ -88,7 +101,13 @@ function createSubtitleStore() {
     }, holdMs);
   };
 
-  const show = (request: SubtitleRequest): void => {
+  const show = (request: SubtitleRequest): boolean => {
+    const kind = request.kind ?? "event";
+
+    if (!canReplace(kind)) {
+      return false;
+    }
+
     clearTimers();
     sequence += 1;
 
@@ -101,7 +120,7 @@ function createSubtitleStore() {
 
     if (!fullText) {
       hide();
-      return;
+      return true;
     }
 
     if (mode === "instant") {
@@ -111,10 +130,11 @@ function createSubtitleStore() {
         fullText,
         tone,
         maxWidth: request.maxWidth,
-        isTyping: false
+        isTyping: false,
+        kind
       });
       scheduleHide(requestId, holdMs);
-      return;
+      return true;
     }
 
     let nextIndex = 0;
@@ -124,7 +144,8 @@ function createSubtitleStore() {
       fullText,
       tone,
       maxWidth: request.maxWidth,
-      isTyping: true
+      isTyping: true,
+      kind
     });
 
     const typeNext = (): void => {
@@ -141,7 +162,8 @@ function createSubtitleStore() {
         fullText,
         tone,
         maxWidth: request.maxWidth,
-        isTyping: nextIndex < fullText.length
+        isTyping: nextIndex < fullText.length,
+        kind
       });
 
       if (nextIndex < fullText.length) {
@@ -153,9 +175,16 @@ function createSubtitleStore() {
     };
 
     typingTimer = window.setTimeout(typeNext, charDelayMs);
+    return true;
   };
 
-  const showTypewriterProgress = (request: SubtitleProgressRequest): void => {
+  const showTypewriterProgress = (request: SubtitleProgressRequest): boolean => {
+    const kind = request.kind ?? "event";
+
+    if (!canReplace(kind)) {
+      return false;
+    }
+
     clearTimers();
     sequence += 1;
     const fullText = request.fullText.trim();
@@ -163,7 +192,7 @@ function createSubtitleStore() {
 
     if (!fullText) {
       hide();
-      return;
+      return true;
     }
 
     setState({
@@ -172,8 +201,10 @@ function createSubtitleStore() {
       fullText,
       tone: request.tone ?? "soft",
       maxWidth: request.maxWidth,
-      isTyping: text.length < fullText.length
+      isTyping: text.length < fullText.length,
+      kind
     });
+    return true;
   };
 
   const finishTypewriterProgress = (holdMs?: number): void => {
@@ -201,7 +232,9 @@ function createSubtitleStore() {
     hide,
     hideAfter: (holdMs: number) => {
       scheduleHide(sequence, holdMs);
-    }
+    },
+    isConversationBubbleActive: () =>
+      state.visible && (state.kind === "conversation" || state.kind === "fallback")
   };
 }
 
@@ -226,6 +259,10 @@ export function useSubtitle() {
   );
   const hide = useCallback(() => subtitleStore.hide(), []);
   const hideAfter = useCallback((holdMs: number) => subtitleStore.hideAfter(holdMs), []);
+  const isConversationBubbleActive = useCallback(
+    () => subtitleStore.isConversationBubbleActive(),
+    []
+  );
 
   return useMemo(
     () => ({
@@ -235,8 +272,17 @@ export function useSubtitle() {
       showTypewriterProgress,
       finishTypewriterProgress,
       hide,
-      hideAfter
+      hideAfter,
+      isConversationBubbleActive
     }),
-    [finishTypewriterProgress, hide, hideAfter, show, showTypewriterProgress, snapshot]
+    [
+      finishTypewriterProgress,
+      hide,
+      hideAfter,
+      isConversationBubbleActive,
+      show,
+      showTypewriterProgress,
+      snapshot
+    ]
   );
 }

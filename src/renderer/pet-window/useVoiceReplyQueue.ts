@@ -77,6 +77,9 @@ export interface UseVoiceReplyQueueResult {
   enqueueFinalText: (voiceText: string, requestId?: number) => void;
   hasActiveAudio: () => boolean;
   hasCommittedSpeech: () => boolean;
+  getCurrentRequestId: () => number;
+  waitForIdle: () => Promise<void>;
+  waitForPlaybackDrained: (requestId: number) => Promise<boolean>;
   holdExpression: (requestId: number, expression?: PetExpressionKey) => boolean;
   finalizeReply: (requestId: number, restartAfterReply: boolean) => void;
   holdSubtitle: (requestId: number) => void;
@@ -86,6 +89,7 @@ export interface UseVoiceReplyQueueResult {
   releaseSubtitle: (requestId: number) => void;
   setPendingExpression: (expression?: PetExpressionKey) => void;
   stop: (options?: { clearPresentation?: boolean }) => void;
+  stopForRequest: (requestId: number, options?: { clearPresentation?: boolean }) => void;
   updateSynchronizedContent: (content: string) => void;
 }
 
@@ -226,6 +230,8 @@ export function useVoiceReplyQueue(
   const restartAfterReplyRef = useRef(false);
   const replyFinalizedRef = useRef(true);
   const completionNotifiedRef = useRef(false);
+  const playbackWaitersRef = useRef(new Map<number, Set<(completed: boolean) => void>>());
+  const idleWaitersRef = useRef(new Set<() => void>());
   const voiceReplyEnabledRef = useRef(false);
   const stopRef = useRef<(options?: { clearPresentation?: boolean }) => void>(
     () => undefined
@@ -282,6 +288,20 @@ export function useVoiceReplyQueue(
         queueRef.current.items.length ||
         pendingUrlsRef.current.size
     );
+
+  const resolveIdleWaiters = (): void => {
+    if (hasActiveAudio()) return;
+    const waiters = [...idleWaitersRef.current];
+    idleWaitersRef.current.clear();
+    waiters.forEach((resolve) => resolve());
+  };
+
+  const resolvePlaybackWaiters = (requestId: number, completed: boolean): void => {
+    const waiters = playbackWaitersRef.current.get(requestId);
+    if (!waiters) return;
+    playbackWaitersRef.current.delete(requestId);
+    waiters.forEach((resolve) => resolve(completed));
+  };
 
   const synthesizeSegment = async (
     segment: string,
@@ -575,6 +595,8 @@ export function useVoiceReplyQueue(
     releaseExpression(requestId);
     optionsRef.current.onPlaybackDrained(restartAfterReplyRef.current);
     restartAfterReplyRef.current = false;
+    resolvePlaybackWaiters(requestId, true);
+    resolveIdleWaiters();
   };
 
   const enqueuePreparedSegments = (
@@ -635,6 +657,7 @@ export function useVoiceReplyQueue(
   };
 
   const stop = (stopOptions?: { clearPresentation?: boolean }): void => {
+    const stoppedRequestId = requestIdRef.current;
     const voiceSessionId = voiceSessionIdRef.current;
     if (stopOptions?.clearPresentation ?? true) {
       if (subtitleHoldRef.current?.active) {
@@ -645,6 +668,7 @@ export function useVoiceReplyQueue(
       }
     }
     requestIdRef.current += 1;
+    resolvePlaybackWaiters(stoppedRequestId, false);
     voiceConfigurationErrorRequestRef.current = undefined;
     voiceErrorReportedRequestRef.current = undefined;
     syncRevealRef.current = undefined;
@@ -678,9 +702,17 @@ export function useVoiceReplyQueue(
       window.URL.revokeObjectURL(audioUrl);
     }
     pendingUrlsRef.current.clear();
+    resolveIdleWaiters();
     void window.desktopPet?.textToSpeech
       .stop({ petId: optionsRef.current.petId, sessionId: voiceSessionId })
       .catch(() => undefined);
+  };
+  const stopForRequest = (
+    requestId: number,
+    stopOptions?: { clearPresentation?: boolean }
+  ): void => {
+    if (requestId !== requestIdRef.current) return;
+    stop(stopOptions);
   };
   useLayoutEffect(() => {
     optionsRef.current = options;
@@ -793,6 +825,25 @@ export function useVoiceReplyQueue(
     return true;
   };
 
+  const waitForPlaybackDrained = (requestId: number): Promise<boolean> => {
+    if (requestId !== requestIdRef.current) return Promise.resolve(false);
+    if (completionNotifiedRef.current && !hasActiveAudio()) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const waiters = playbackWaitersRef.current.get(requestId) ?? new Set();
+      waiters.add(resolve);
+      playbackWaitersRef.current.set(requestId, waiters);
+      completePlaybackIfReady(requestId);
+    });
+  };
+
+  const waitForIdle = (): Promise<void> => {
+    if (!hasActiveAudio()) return Promise.resolve();
+    return new Promise((resolve) => {
+      idleWaitersRef.current.add(resolve);
+      resolveIdleWaiters();
+    });
+  };
+
   return {
     awaitSynchronizedPlaybackStart,
     beginReply,
@@ -810,6 +861,9 @@ export function useVoiceReplyQueue(
     enqueueFinalText,
     hasActiveAudio,
     hasCommittedSpeech: () => queueRef.current.queuedVoiceSegments.length > 0,
+    getCurrentRequestId: () => requestIdRef.current,
+    waitForIdle,
+    waitForPlaybackDrained,
     holdExpression,
     finalizeReply: (requestId: number, restartAfterReply: boolean) => {
       if (requestId !== requestIdRef.current) {
@@ -834,6 +888,7 @@ export function useVoiceReplyQueue(
       pendingExpressionRef.current = expression;
     },
     stop,
+    stopForRequest,
     updateSynchronizedContent: (content: string) => {
       const revealState = syncRevealRef.current;
       if (revealState?.requestId === requestIdRef.current) {

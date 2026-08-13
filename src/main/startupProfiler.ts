@@ -1,7 +1,13 @@
+// TIMED DIAGNOSTICS TEST MODULE: startup phase collector.
 import type { StartupRendererStage } from "../shared/types/startup";
+import {
+  TIMED_DIAGNOSTICS_TEST_MODULE,
+  type TimedDiagnosticEvent
+} from "../shared/types/timedDiagnostics";
 
 type StartupClock = () => number;
 type StartupLogWriter = (line: string) => void;
+type StartupTimingListener = (event: TimedDiagnosticEvent) => void;
 
 const rendererStageLabels: Record<StartupRendererStage, string> = {
   "html-inline-script-started": "HTML 启动内联脚本开始执行",
@@ -31,20 +37,40 @@ export class StartupProfiler {
   private readonly startedAt: number;
   private lastLoggedAt: number;
   private readonly completedKeys = new Set<string>();
+  private readonly events: TimedDiagnosticEvent[] = [];
+  private readonly listeners = new Set<StartupTimingListener>();
+  private nextEventSequence = 1;
 
   constructor(
     readonly enabled: boolean,
     private readonly now: StartupClock = () => performance.now(),
-    private readonly write: StartupLogWriter = (line) => console.log(line),
+    private readonly write: StartupLogWriter = () => undefined,
     startedAt?: number
   ) {
     this.startedAt = startedAt ?? this.now();
     this.lastLoggedAt = this.startedAt;
   }
 
-  private log(label: string, stepMilliseconds: number, failed = false): void {
+  private log(key: string, label: string, stepMilliseconds: number, failed = false): void {
     const current = this.now();
     const status = failed ? "失败" : "完成";
+    const sequence = this.nextEventSequence++;
+    const event: TimedDiagnosticEvent = {
+      module: TIMED_DIAGNOSTICS_TEST_MODULE,
+      eventId: `startup:${sequence}`,
+      group: "startup",
+      requestId: "startup",
+      sequence,
+      phase: "startup",
+      stage: key,
+      label,
+      stepMs: Math.max(0, current - this.lastLoggedAt),
+      totalMs: Math.max(0, current - this.startedAt),
+      ok: !failed
+    };
+    this.events.push(event);
+    if (this.events.length > 512) this.events.shift();
+    for (const listener of this.listeners) listener(event);
     this.write(
       `[启动计时] 累计 ${milliseconds(current - this.startedAt)} ms | 本步 ${milliseconds(stepMilliseconds)} ms | ${status}：${label}`
     );
@@ -55,7 +81,7 @@ export class StartupProfiler {
     if (!this.enabled || this.completedKeys.has(key)) return;
     this.completedKeys.add(key);
     const current = this.now();
-    this.log(label, current - this.lastLoggedAt);
+    this.log(key, label, current - this.lastLoggedAt);
   }
 
   reportRendererStage(stage: StartupRendererStage): void {
@@ -68,10 +94,10 @@ export class StartupProfiler {
     const stepStartedAt = this.now();
     try {
       const result = await operation();
-      this.log(label, this.now() - stepStartedAt);
+      this.log(key, label, this.now() - stepStartedAt);
       return result;
     } catch (error) {
-      this.log(label, this.now() - stepStartedAt, true);
+      this.log(key, label, this.now() - stepStartedAt, true);
       throw error;
     }
   }
@@ -82,12 +108,23 @@ export class StartupProfiler {
     const stepStartedAt = this.now();
     try {
       const result = operation();
-      this.log(label, this.now() - stepStartedAt);
+      this.log(key, label, this.now() - stepStartedAt);
       return result;
     } catch (error) {
-      this.log(label, this.now() - stepStartedAt, true);
+      this.log(key, label, this.now() - stepStartedAt, true);
       throw error;
     }
+  }
+
+  /** TIMED DIAGNOSTICS TEST MODULE: expose bounded events to the main window. */
+  subscribe(listener: StartupTimingListener): () => void {
+    if (!this.enabled) return () => undefined;
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  getEvents(): TimedDiagnosticEvent[] {
+    return this.events.slice();
   }
 }
 
@@ -102,6 +139,6 @@ const validRequestedStartTime = Number.isFinite(requestedStartTime) &&
 export const startupProfiler = new StartupProfiler(
   process.env.ZHUOMIANLING_STARTUP_TIMING === "1",
   () => Date.now(),
-  (line) => console.log(line),
+  () => undefined,
   validRequestedStartTime
 );

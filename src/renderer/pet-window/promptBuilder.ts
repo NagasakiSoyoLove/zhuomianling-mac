@@ -1,4 +1,8 @@
-import type { AiChatMessage } from "../../shared/types/ai";
+import {
+  AI_CHAT_LIMITS,
+  type AiChatImageAttachment,
+  type AiChatMessage
+} from "../../shared/types/ai";
 
 export interface PromptBuilderChatMessage {
   role: "user" | "pet";
@@ -6,6 +10,7 @@ export interface PromptBuilderChatMessage {
   status?: "thinking" | "error";
   voiceText?: string;
   aiStructuredContent?: string;
+  screenshot?: AiChatImageAttachment;
 }
 
 export interface BuildAiMessagesOptions {
@@ -32,10 +37,11 @@ export function buildAiMessages({
 }: BuildAiMessagesOptions): AiChatMessage[] {
   const recentMessages = messages
     .filter((message) => message.status !== "thinking" && message.status !== "error")
-    .slice(-12)
+    .slice(-AI_CHAT_LIMITS.maxContextMessages)
     .map<AiChatMessage>((message) => ({
       role: message.role === "user" ? "user" : "assistant",
-      content: message.role === "pet" ? buildAssistantHistoryContent(message) : message.text
+      content: message.role === "pet" ? buildAssistantHistoryContent(message) : message.text,
+      ...(message.screenshot ? { image: message.screenshot } : {})
     }));
 
   return [

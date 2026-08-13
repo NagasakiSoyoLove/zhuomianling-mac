@@ -1,6 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
-import type { AiChatStreamEvent } from "../../shared/types/ai";
+import type {
+  AiChatImageAttachment,
+  AiChatStreamEvent,
+  AiProtocolTier
+} from "../../shared/types/ai";
 import type {
   PetDefinition,
   PetExpressionKey,
@@ -18,6 +22,10 @@ import { isCurrentAiStreamEvent } from "./aiStreamGuard";
 import type { ChatMessage } from "./petWindowChatTypes";
 import { buildAiMessages } from "./promptBuilder";
 import type { UseVoiceReplyQueueResult } from "./useVoiceReplyQueue";
+import type {
+  ScreenVisionPresentationKind,
+  ScreenVisionTimingStage
+} from "../../shared/types/screen";
 
 interface UseAiStreamOptions {
   petId: string;
@@ -27,7 +35,11 @@ interface UseAiStreamOptions {
   setDraft: Dispatch<SetStateAction<string>>;
   subtitle: Pick<
     ReturnType<typeof useSubtitle>,
-    "show" | "showTypewriterProgress" | "finishTypewriterProgress"
+    | "show"
+    | "showTypewriterProgress"
+    | "finishTypewriterProgress"
+    | "hide"
+    | "isConversationBubbleActive"
   >;
   voiceReply: UseVoiceReplyQueueResult;
   clearVoiceTypewriter: () => void;
@@ -49,23 +61,32 @@ interface UseAiStreamOptions {
 }
 
 interface AiStreamContext {
+  kind: "stream" | "external";
   requestId: string;
   petId: string;
-  pendingMessageId: number;
+  pendingMessageId?: number;
   isVoiceTriggered: boolean;
   voiceReplyRequestId: number;
   voiceReplyEnabled: boolean;
   syncTextWithVoice: boolean;
   useReplyAsVoiceText: boolean;
   latestSafeReply: string;
+  active: boolean;
+  presentationKind?: ScreenVisionPresentationKind;
+  externalReplyReceived?: boolean;
+  visionTimingRequestId?: string;
+  visionBubbleQueued?: boolean;
+  chatFirstReplyReported?: boolean;
+  chatBubbleQueued?: boolean;
 }
 
 interface TypewriterPresentation {
-  messageId: number;
+  messageId?: number;
   fullText: string;
   displayedCharacters: number;
   voiceText?: string;
   aiStructuredContent?: string;
+  presentationKind?: ScreenVisionPresentationKind;
   finalized: boolean;
   holdMs?: number;
 }
@@ -81,8 +102,35 @@ export interface SafeAiStreamPresentation {
 }
 
 export interface UseAiStreamResult {
+  beginExternalQuestion: (userText: string, visionTimingRequestId?: string) => number | false;
+  attachMessageScreenshot: (messageId: number, screenshot: AiChatImageAttachment) => void;
   cancel: (options?: { updateUi?: boolean }) => void;
+  clearExternalPresentation: (requestId?: number) => void;
+  failExternalQuestion: (message: string) => void;
   messages: ChatMessage[];
+  presentExternalChunk: (
+    reply: string,
+    options?: {
+      showInChat?: boolean;
+      voiceText?: string;
+      protocolTier?: AiProtocolTier;
+      presentationKind?: ScreenVisionPresentationKind;
+      voiceSessionId?: string;
+    }
+  ) => void;
+  presentExternalReply: (
+    reply: string,
+    options?: {
+      userText?: string;
+      addToHistory?: boolean;
+      showInChat?: boolean;
+      voiceText?: string;
+      emotion?: string;
+      presentationKind?: ScreenVisionPresentationKind;
+      voiceSessionId?: string;
+      onStarted?: (requestId: number) => void;
+    }
+  ) => Promise<number | false>;
   reportVoiceError: (text: string) => void;
   sendMessageText: (text: string, isVoiceTriggered?: boolean) => Promise<void>;
   sending: boolean;
@@ -91,6 +139,44 @@ export interface UseAiStreamResult {
 }
 
 const chatReplyTypewriterDelayMs = 34;
+
+// TIMED DIAGNOSTICS TEST MODULE: renderer-side chat and visual timing instrumentation.
+function reportExternalVisionTiming(
+  context: AiStreamContext,
+  stage: ScreenVisionTimingStage,
+  ok = true
+): void {
+  if (context.kind !== "external" || !context.visionTimingRequestId) return;
+  if (stage === "bubble-queued" && context.visionBubbleQueued) return;
+  if (stage === "bubble-queued") context.visionBubbleQueued = true;
+  window.desktopPet?.screenMonitor.timing?.({
+    petId: context.petId,
+    requestId: context.visionTimingRequestId,
+    phase: "renderer",
+    stage,
+    ok
+  });
+}
+
+function reportChatTiming(
+  context: AiStreamContext,
+  stage: ScreenVisionTimingStage,
+  ok = true
+): void {
+  if (context.kind !== "stream") return;
+  if (stage === "reply-chunk-received" && context.chatFirstReplyReported) return;
+  if (stage === "reply-chunk-received") context.chatFirstReplyReported = true;
+  if (stage === "bubble-queued" && context.chatBubbleQueued) return;
+  if (stage === "bubble-queued") context.chatBubbleQueued = true;
+  window.desktopPet?.screenMonitor.timing?.({
+    petId: context.petId,
+    requestId: context.requestId,
+    kind: "chat",
+    phase: "renderer",
+    stage,
+    ok
+  });
+}
 
 function getTextDisplayDurationMs(text: string): number {
   const textLength = text.trim().length;
@@ -221,6 +307,8 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
   const typewriterTimerRef = useRef<number | undefined>();
   const typewriterSequenceRef = useRef(0);
   const typewriterPresentationRef = useRef<TypewriterPresentation | undefined>();
+  const externalContextRef = useRef<AiStreamContext | undefined>();
+  const externalPresentationRequestIdRef = useRef<number | undefined>();
   const cancelRef = useRef<(options?: { updateUi?: boolean }) => void>(() => undefined);
 
   useLayoutEffect(() => {
@@ -249,26 +337,30 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
       .slice(0, presentation.displayedCharacters)
       .join("");
     const currentDefinition = optionsRef.current.petDefinition;
-    setMessages((current) =>
-      current.map((message) =>
-        message.id === presentation.messageId
-          ? {
-              ...message,
-              text: visibleText,
-              status: undefined,
-              voiceText: presentation.finalized ? presentation.voiceText : message.voiceText,
-              aiStructuredContent: presentation.finalized
-                ? presentation.aiStructuredContent
-                : message.aiStructuredContent
-            }
-          : message
-      )
-    );
+    if (presentation.messageId !== undefined) {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === presentation.messageId
+            ? {
+                ...message,
+                text: visibleText,
+                status: undefined,
+                presentationKind: presentation.presentationKind,
+                voiceText: presentation.finalized ? presentation.voiceText : message.voiceText,
+                aiStructuredContent: presentation.finalized
+                  ? presentation.aiStructuredContent
+                  : message.aiStructuredContent
+              }
+            : message
+        )
+      );
+    }
     optionsRef.current.subtitle.showTypewriterProgress({
       text: visibleText,
       fullText: presentation.fullText,
       tone: currentDefinition?.subtitleStyle?.tone,
-      maxWidth: currentDefinition?.subtitleStyle?.maxWidth
+      maxWidth: currentDefinition?.subtitleStyle?.maxWidth,
+      kind: presentation.presentationKind === "fallback" ? "fallback" : "conversation"
     });
   };
 
@@ -297,9 +389,13 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
   };
 
   const queuePetMessageWithTypewriter = (
-    messageId: number,
+    messageId: number | undefined,
     fullText: string,
-    messageOptions?: { voiceText?: string; aiStructuredContent?: string },
+    messageOptions?: {
+      voiceText?: string;
+      aiStructuredContent?: string;
+      presentationKind?: ScreenVisionPresentationKind;
+    },
     completionOptions?: { finalized?: boolean; holdMs?: number }
   ): void => {
     const normalizedText = fullText.trim();
@@ -314,6 +410,7 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
         displayedCharacters: 0,
         voiceText: messageOptions?.voiceText,
         aiStructuredContent: messageOptions?.aiStructuredContent,
+        presentationKind: messageOptions?.presentationKind,
         finalized: Boolean(completionOptions?.finalized),
         holdMs: completionOptions?.holdMs
       };
@@ -327,6 +424,8 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
       presentation.voiceText = messageOptions?.voiceText ?? presentation.voiceText;
       presentation.aiStructuredContent =
         messageOptions?.aiStructuredContent ?? presentation.aiStructuredContent;
+      presentation.presentationKind =
+        messageOptions?.presentationKind ?? presentation.presentationKind;
       presentation.finalized ||= Boolean(completionOptions?.finalized);
       presentation.holdMs = completionOptions?.holdMs ?? presentation.holdMs;
       presentation.displayedCharacters = Math.min(
@@ -351,6 +450,8 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
   };
 
   const finishReply = async (context: AiStreamContext, event: AiChatStreamEvent): Promise<void> => {
+    if (!context.active) return;
+    reportChatTiming(context, "reply-chunk-received");
     const currentOptions = optionsRef.current;
     const definition = currentOptions.petDefinition;
     const replyText = event.content ?? "";
@@ -384,16 +485,19 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
         requestId
       );
       if (currentOptions.voiceReply.isPlaybackBlocked()) {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === context.pendingMessageId
-              ? { ...message, text: "首句语音生成中..." }
-              : message
-          )
-        );
+        if (context.pendingMessageId !== undefined) {
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === context.pendingMessageId
+                ? { ...message, text: "首句语音生成中..." }
+                : message
+            )
+          );
+        }
         if (!(await currentOptions.voiceReply.awaitSynchronizedPlaybackStart(requestId))) {
           return;
         }
+        if (!context.active) return;
       }
     }
 
@@ -406,10 +510,13 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
           ...(effectiveVoiceText ? { voiceText: effectiveVoiceText } : {}),
           reply: replyText,
           ...(event.emotion ? { emotion: event.emotion } : {})
-        })
+        }),
+        ...(context.presentationKind ? { presentationKind: context.presentationKind } : {})
       },
       { finalized: true, holdMs: shouldHoldSubtitleForVoice ? Number.POSITIVE_INFINITY : undefined }
     );
+    reportChatTiming(context, "bubble-queued");
+    reportExternalVisionTiming(context, "bubble-queued");
 
     if (randomReplySource) {
       currentOptions.triggerExpressionSource(
@@ -455,10 +562,13 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
     if (!shouldHoldSubtitleForVoice) {
       currentOptions.scheduleVoiceRestart(context.isVoiceTriggered);
     }
+    reportChatTiming(context, "reply-completed");
   };
 
   const failReply = (context: AiStreamContext, errorText: string): void => {
     const currentOptions = optionsRef.current;
+    reportChatTiming(context, "request-failed", false);
+    reportExternalVisionTiming(context, "request-failed", false);
     const preserveCommittedReply =
       currentOptions.voiceReply.hasCommittedSpeech() && Boolean(context.latestSafeReply.trim());
     const presentationText = preserveCommittedReply
@@ -466,19 +576,22 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
       : errorText;
     currentOptions.voiceReply.stop();
     clearTypewriter();
-    setMessages((current) =>
-      current.map((message) =>
-        message.id === context.pendingMessageId
-          ? { id: context.pendingMessageId, role: "pet", text: presentationText, status: "error" }
-          : message
-      )
-    );
+    if (context.pendingMessageId !== undefined) {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === context.pendingMessageId
+            ? { id: context.pendingMessageId, role: "pet", text: presentationText, status: "error" }
+            : message
+        )
+      );
+    }
     currentOptions.triggerExpression("panic", "high", 3600);
     currentOptions.subtitle.show({
       text: preserveCommittedReply ? "回复生成中断。" : errorText,
       mode: "typewriter",
       tone: currentOptions.petDefinition?.subtitleStyle?.tone,
-      maxWidth: currentOptions.petDefinition?.subtitleStyle?.maxWidth
+      maxWidth: currentOptions.petDefinition?.subtitleStyle?.maxWidth,
+      kind: "system"
     });
     setSendingState(false);
     currentOptions.resetIdleTimer();
@@ -488,7 +601,8 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
   const cancel = (cancelOptions?: { updateUi?: boolean }): void => {
     const requestId = streamRequestIdRef.current;
     const streamId = streamIdRef.current;
-    const context = streamContextRef.current;
+    const externalContext = externalContextRef.current;
+    const context = streamContextRef.current ?? externalContext;
     const preserveCommittedReply = Boolean(
       context &&
         optionsRef.current.voiceReply.hasCommittedSpeech() &&
@@ -497,9 +611,13 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
     streamRequestIdRef.current = undefined;
     streamIdRef.current = undefined;
     streamContextRef.current = undefined;
+    if (externalContext) {
+      externalContext.active = false;
+      externalContextRef.current = undefined;
+    }
     optionsRef.current.voiceReply.cancelSynchronizedReveal();
 
-    if (requestId || streamId) {
+    if ((requestId || streamId) && context?.kind !== "external") {
       void window.desktopPet?.aiChat
         .cancel({
           petId: context?.petId ?? optionsRef.current.petId,
@@ -514,8 +632,9 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
       });
     }
     if (cancelOptions?.updateUi ?? true) {
+      optionsRef.current.subtitle.hide();
+      clearTypewriter();
       if (context) {
-        clearTypewriter();
         setMessages((current) =>
           current.map((message) =>
             message.id === context.pendingMessageId
@@ -557,8 +676,11 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
         context.latestSafeReply = replyText;
         if (context.syncTextWithVoice) {
           optionsRef.current.voiceReply.updateSynchronizedContent(replyText);
-        } else {
-          showStreamingReply(context.pendingMessageId, replyText);
+        } else if (context.pendingMessageId !== undefined) {
+          if (showStreamingReply(context.pendingMessageId, replyText)) {
+            reportChatTiming(context, "reply-chunk-received");
+            reportChatTiming(context, "bubble-queued");
+          }
         }
         enqueueSafeStreamingVoiceChunk(
           event,
@@ -624,6 +746,7 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
     cancel({ updateUi: false });
     clearTypewriter();
     const currentOptions = optionsRef.current;
+    currentOptions.subtitle.hide();
     const settingsSnapshot = createAiStreamSettingsSnapshot(
       currentOptions.settings,
       currentOptions.petDefinition
@@ -639,17 +762,20 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
       requestId
     );
     const context: AiStreamContext = {
+      kind: "stream",
       requestId,
       petId: currentOptions.petId,
       pendingMessageId,
       isVoiceTriggered,
       voiceReplyRequestId,
       latestSafeReply: "",
+      active: true,
       ...settingsSnapshot
     };
     streamRequestIdRef.current = requestId;
     streamIdRef.current = undefined;
     streamContextRef.current = context;
+    reportChatTiming(context, "request-started");
     const aiMessages = buildAiMessages({
       messages: messagesRef.current,
       nextUserText: nextText
@@ -720,13 +846,253 @@ export function useAiStream(options: UseAiStreamOptions): UseAiStreamResult {
     }
   };
 
+  const clearExternalPresentation = (requestId?: number): void => {
+    const context = externalContextRef.current;
+    const activeRequestId = context?.voiceReplyRequestId ?? externalPresentationRequestIdRef.current;
+    if (requestId !== undefined && activeRequestId !== requestId) return;
+    if (context) {
+      context.active = false;
+      externalContextRef.current = undefined;
+    }
+    if (activeRequestId === undefined && requestId !== undefined) return;
+    clearTypewriter();
+    optionsRef.current.subtitle.hide();
+    optionsRef.current.triggerExpression("normal", "high", 1_800);
+    if (requestId === undefined || activeRequestId === requestId) {
+      externalPresentationRequestIdRef.current = undefined;
+    }
+  };
+
+  const createExternalContext = (
+    pendingMessageId?: number,
+    visionTimingRequestId?: string,
+    voiceSessionId?: string
+  ): AiStreamContext => {
+    const currentOptions = optionsRef.current;
+    const settingsSnapshot = createAiStreamSettingsSnapshot(
+      currentOptions.settings,
+      currentOptions.petDefinition
+    );
+    const requestId = `external-${Date.now()}-${++requestSequenceRef.current}`;
+    const voiceReplyRequestId = currentOptions.voiceReply.beginReply(
+      pendingMessageId ?? Date.now(),
+      settingsSnapshot.syncTextWithVoice,
+      settingsSnapshot.voiceReplyEnabled,
+      voiceSessionId ?? visionTimingRequestId ?? requestId
+    );
+    externalPresentationRequestIdRef.current = voiceReplyRequestId;
+    return {
+      kind: "external",
+      requestId,
+      petId: currentOptions.petId,
+      pendingMessageId,
+      isVoiceTriggered: false,
+      voiceReplyRequestId,
+      latestSafeReply: "",
+      active: true,
+      visionTimingRequestId,
+      ...settingsSnapshot
+    };
+  };
+
+  const beginExternalQuestion = (userText: string, visionTimingRequestId?: string): number | false => {
+    const normalizedText = userText.trim().slice(0, 8_000);
+    if (!normalizedText || sendingRef.current) return false;
+
+    cancel({ updateUi: false });
+    clearTypewriter();
+    const currentOptions = optionsRef.current;
+    currentOptions.subtitle.hide();
+    const userMessageId = Date.now();
+    const pendingMessageId = userMessageId + 1;
+    const context = createExternalContext(pendingMessageId, visionTimingRequestId);
+    externalContextRef.current = context;
+
+    setSendingState(true);
+    setMessages((current) => [
+      ...current,
+      { id: userMessageId, role: "user", text: normalizedText },
+      { id: pendingMessageId, role: "pet", text: "正在观察屏幕…", status: "thinking" }
+    ]);
+    currentOptions.clearVoiceTypewriter();
+    currentOptions.triggerExpression("focus", "normal", 1800);
+    currentOptions.speakLine("userMessage", "嗯，我听见了。");
+    currentOptions.resetIdleTimer();
+    return userMessageId;
+  };
+
+  const failExternalQuestion = (message: string): void => {
+    const context = externalContextRef.current;
+    if (!context) return;
+    externalContextRef.current = undefined;
+    context.active = false;
+    failReply(context, message);
+  };
+
   const reportVoiceError = (text: string): void => {
     setMessages((current) => appendVoiceErrorMessage(current, text));
   };
 
+  const attachMessageScreenshot = (messageId: number, screenshot: AiChatImageAttachment): void => {
+    setMessages((current) => current.map((message) =>
+      message.id === messageId && message.role === "user"
+        ? {
+            ...message,
+            screenshot: {
+              data: screenshot.data.slice(),
+              mimeType: screenshot.mimeType
+            }
+          }
+        : message
+    ));
+  };
+
+  const presentExternalChunk = (
+    reply: string,
+    presentationOptions: {
+      showInChat?: boolean;
+      voiceText?: string;
+      protocolTier?: AiProtocolTier;
+      presentationKind?: ScreenVisionPresentationKind;
+      voiceSessionId?: string;
+    } = {}
+  ): void => {
+    const showInChat = presentationOptions.showInChat !== false;
+    let context = externalContextRef.current;
+    if (!context) {
+      if (showInChat) return;
+      if (
+        sendingRef.current ||
+        optionsRef.current.voiceReply.hasActiveAudio() ||
+        optionsRef.current.subtitle.isConversationBubbleActive()
+      ) {
+        return;
+      }
+      cancel({ updateUi: false });
+      clearTypewriter();
+      context = createExternalContext(
+        undefined,
+        undefined,
+        presentationOptions.voiceSessionId
+      );
+      externalContextRef.current = context;
+    }
+    if (!context.active || context.externalReplyReceived) return;
+    if (presentationOptions.presentationKind) {
+      context.presentationKind = presentationOptions.presentationKind;
+    }
+
+    const normalizedReply = reply.trim().slice(0, 4_000);
+    const normalizedVoiceText = presentationOptions.voiceText?.trim().slice(0, 4_000);
+    if (!normalizedReply && !normalizedVoiceText) return;
+
+    if (normalizedReply) {
+      context.latestSafeReply = normalizedReply;
+      if (context.syncTextWithVoice) {
+        optionsRef.current.voiceReply.updateSynchronizedContent(normalizedReply);
+      } else if (context.pendingMessageId !== undefined) {
+        showStreamingReply(context.pendingMessageId, normalizedReply);
+        reportExternalVisionTiming(context, "bubble-queued");
+      }
+    }
+
+    enqueueSafeStreamingVoiceChunk(
+      {
+        content: normalizedReply,
+        ...(normalizedVoiceText ? { voiceText: normalizedVoiceText } : {}),
+        protocolTier: presentationOptions.protocolTier
+      },
+      {
+        enabled: context.voiceReplyEnabled,
+        useReplyAsVoiceText: context.useReplyAsVoiceText,
+        requestId: context.voiceReplyRequestId
+      },
+      optionsRef.current.voiceReply
+    );
+  };
+
+  const presentExternalReply = async (
+    reply: string,
+    presentationOptions: {
+      userText?: string;
+      addToHistory?: boolean;
+      showInChat?: boolean;
+      voiceText?: string;
+      emotion?: string;
+      presentationKind?: ScreenVisionPresentationKind;
+      voiceSessionId?: string;
+      onStarted?: (requestId: number) => void;
+    } = {}
+  ): Promise<number | false> => {
+    const normalizedReply = reply.trim().slice(0, 4_000);
+    if (!normalizedReply) return false;
+
+    const showInChat = presentationOptions.showInChat !== false;
+    let context = externalContextRef.current;
+    if (!context) {
+      if (showInChat) return false;
+      const currentOptions = optionsRef.current;
+      if (
+        !showInChat &&
+        (
+          sendingRef.current ||
+          currentOptions.voiceReply.hasActiveAudio() ||
+          currentOptions.subtitle.isConversationBubbleActive()
+        )
+      ) {
+        return false;
+      }
+
+      cancel({ updateUi: false });
+      clearTypewriter();
+      context = createExternalContext(
+        undefined,
+        undefined,
+        presentationOptions.voiceSessionId
+      );
+      externalContextRef.current = context;
+    }
+    if (!context.active || context.externalReplyReceived) return false;
+    if (!showInChat && context.pendingMessageId !== undefined) return false;
+    if (presentationOptions.presentationKind) {
+      context.presentationKind = presentationOptions.presentationKind;
+    }
+    context.externalReplyReceived = true;
+    context.latestSafeReply = normalizedReply;
+
+    const voiceText = presentationOptions.voiceText?.trim() || undefined;
+    presentationOptions.onStarted?.(context.voiceReplyRequestId);
+    const presentation = finishReply(context, {
+      streamId: context.requestId,
+      requestId: context.requestId,
+      petId: context.petId,
+      ok: true,
+      type: "done",
+      content: normalizedReply,
+      ...(voiceText ? { voiceText } : {}),
+      ...(presentationOptions.emotion?.trim()
+        ? { emotion: presentationOptions.emotion.trim() }
+        : {}),
+      protocolTier: voiceText ? "full" : "text"
+    }).then(() => context.voiceReplyRequestId);
+    return presentation.finally(() => {
+      reportExternalVisionTiming(context, "reply-completed");
+      if (externalContextRef.current === context) {
+        externalContextRef.current = undefined;
+        context.active = false;
+      }
+    });
+  };
+
   return {
+    beginExternalQuestion,
+    attachMessageScreenshot,
     cancel,
+    clearExternalPresentation,
+    failExternalQuestion,
     messages,
+    presentExternalChunk,
+    presentExternalReply,
     reportVoiceError,
     sendMessageText,
     sending,

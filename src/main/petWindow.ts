@@ -401,7 +401,10 @@ function createPetWindow(payload: DesktopPetPayload): BrowserWindow {
       sandbox: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
-      navigateOnDragDrop: false
+      navigateOnDragDrop: false,
+      // The pet stays visible above foreground games and must continue painting
+      // the hover-only unlock control while this window is blurred.
+      backgroundThrottling: false
     }
   });
   resetPositionOnNextCreate = false;

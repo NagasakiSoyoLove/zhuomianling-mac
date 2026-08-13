@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PetCustomTheme, PetDefinition } from "../../../shared/types/pet";
+import type { PetCustomTheme, PetDefinition, PetUiTheme } from "../../../shared/types/pet";
 import { ThemePanel } from "./ThemePanel";
 
 const importedTheme: PetCustomTheme = {
@@ -18,7 +18,7 @@ const importedTheme: PetCustomTheme = {
   }
 };
 
-function createPet(customTheme?: PetCustomTheme): PetDefinition {
+function createPet(customTheme?: PetCustomTheme, theme: PetUiTheme = customTheme ? "custom" : "soft"): PetDefinition {
   return {
     id: "theme-test-pet",
     name: "主题测试桌宠",
@@ -28,7 +28,7 @@ function createPet(customTheme?: PetCustomTheme): PetDefinition {
     capabilities: { chat: true, voiceOutput: false, subtitles: true },
     details: { role: "", personality: "", scenes: [], features: [] },
     uiSettings: {
-      theme: customTheme ? "custom" : "soft",
+      theme,
       ...(customTheme ? { customTheme } : {})
     }
   };
@@ -60,5 +60,15 @@ describe("ThemePanel", () => {
 
     expect(markup).not.toContain("themeCardDelete");
     expect(markup).toContain("软糖风");
+  });
+
+  it("keeps the imported theme card visible while a built-in theme is active", () => {
+    const markup = renderToStaticMarkup(
+      <ThemePanel pet={createPet(importedTheme, "minimal")} onDirtyChange={vi.fn()} />
+    );
+
+    expect(markup).toContain("薄荷格纹");
+    expect(markup).toContain('aria-label="删除导入主题「薄荷格纹」"');
+    expect(markup).toContain("极简风");
   });
 });

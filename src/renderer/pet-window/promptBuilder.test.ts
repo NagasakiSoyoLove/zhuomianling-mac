@@ -46,4 +46,23 @@ describe("buildAiMessages", () => {
     expect(messages[0]).toEqual({ role: "user", content: "历史 1" });
     expect(messages.at(-1)).toEqual({ role: "user", content: "新问题" });
   });
+
+  // TIMED DIAGNOSTICS TEST MODULE: screenshot history attachment coverage.
+  it("keeps a screenshot attached to the history message that produced it", () => {
+    const screenshot = {
+      data: new Uint8Array([1, 2, 3, 4]),
+      mimeType: "image/jpeg" as const
+    };
+    expect(buildAiMessages({
+      messages: [{ role: "user", text: "刚才屏幕上是什么？", screenshot }],
+      nextUserText: "继续说"
+    })).toEqual([
+      {
+        role: "user",
+        content: "刚才屏幕上是什么？",
+        image: screenshot
+      },
+      { role: "user", content: "继续说" }
+    ]);
+  });
 });

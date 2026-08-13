@@ -43,7 +43,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        pet: resolve(__dirname, "pet.html")
+        pet: resolve(__dirname, "pet.html"),
+        help: resolve(__dirname, "help.html")
       }
     }
   },
@@ -64,7 +65,11 @@ export default defineConfig({
         "./src/renderer/styles/**/*.css",
         "./src/renderer/components/PetSelector/PetSelector.tsx",
         "./src/renderer/components/StartupSplash/StartupSplash.tsx",
-        "./src/renderer/pets/petSources.ts"
+        "./src/renderer/pets/petSources.ts",
+        "./src/renderer/help/main.tsx",
+        "./src/renderer/help/HelpApp.tsx",
+        "./src/renderer/help/help.css",
+        "./docs/help/nav.ts"
       ]
     }
   }

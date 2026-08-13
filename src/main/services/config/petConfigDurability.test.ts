@@ -274,7 +274,7 @@ describe("pet config durable persistence", () => {
     await expect(fs.access(path.join(temporaryDirectory, "themes"))).rejects.toThrow();
   });
 
-  it("drops the pet-local custom theme when a built-in theme is saved", async () => {
+  it("keeps the pet-local custom theme when a built-in theme is saved", async () => {
     await writePetFixture();
     const { saveLocalPetUiSettings } = await import("./petConfigStore");
     await saveLocalPetUiSettings({
@@ -299,7 +299,17 @@ describe("pet config durable persistence", () => {
 
     const stored = JSON.parse(await fs.readFile(getPetConfigPath(), "utf8"));
     expect(stored.uiSettings.theme).toBe("minimal");
-    expect(stored.uiSettings).not.toHaveProperty("customTheme");
+    expect(stored.uiSettings.customTheme).toMatchObject({ id: "mint-plaid", name: "薄荷格纹" });
+
+    await saveLocalPetUiSettings({
+      petId: "pet-a",
+      theme: "minimal",
+      removeCustomTheme: true
+    });
+
+    const afterDelete = JSON.parse(await fs.readFile(getPetConfigPath(), "utf8"));
+    expect(afterDelete.uiSettings.theme).toBe("minimal");
+    expect(afterDelete.uiSettings).not.toHaveProperty("customTheme");
   });
 
   it("durably reloads a partially off-screen desktop position and preserves it in later UI saves", async () => {

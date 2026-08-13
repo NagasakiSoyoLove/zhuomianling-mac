@@ -22,7 +22,7 @@ export interface PetPackageManifestV1 {
 
 export type PortablePetDefinitionV1 = Omit<
   PetDefinition,
-  "id" | "modelPath" | "avatarImage" | "memorySettings" | "voiceInputSettings" | "isLocal" | "voiceModelSettings"
+  "id" | "modelPath" | "avatarImage" | "memorySettings" | "voiceInputSettings" | "screenAwarenessSettings" | "isLocal" | "voiceModelSettings"
 > & {
   schemaVersion: 1;
   live2dEntry: string;

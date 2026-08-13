@@ -169,6 +169,18 @@
   color: #344255;
 }
 
+.editorSubTab.locked,
+.editorSubTab.locked:hover {
+  cursor: not-allowed;
+  color: #a5afbb;
+  background: transparent;
+  opacity: 0.7;
+}
+
+.editorSubTab.locked svg {
+  color: #b5bfca;
+}
+
 .editorSubTab.active {
   background: #e8f2ff;
   color: #1766c2;

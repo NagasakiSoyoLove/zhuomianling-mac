@@ -87,7 +87,9 @@ export function Subtitle({ state, anchor }: SubtitleProps): JSX.Element | null {
   return (
     <div
       ref={bubbleRef}
-      className={`petSubtitleBubble tone-${state.tone}${state.isTyping ? " typing" : ""}`}
+      className={["petSubtitleBubble", `tone-${state.tone}`, state.isTyping ? "typing" : "", state.kind]
+        .filter(Boolean)
+        .join(" ")}
       style={style}
       aria-live="polite"
     >

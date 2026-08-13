@@ -16,9 +16,12 @@ import type {
   PetPackageManifestV1,
   PortablePetDefinitionV1
 } from "../../../shared/types/petPackage";
+import type { VisionCapability } from "../../../shared/types/screen";
 import { PET_PACKAGE_LIMITS, allocateImportedPetId, normalizePetPackageEntryPath, parsePetPackageManifest, parsePortablePetDefinition } from "../../../shared/validation/petPackage";
 import { normalizeLegacyPetDefinition } from "../../../shared/validation/petDefinition";
 import { deleteAiConnection, listAiModels, saveAiConnection, testAiOutputCapability } from "../ai/aiSettings";
+import { clearChatVisionCapability, saveChatVisionCapability } from "../screen/ScreenVisionConnectionStore";
+import { testChatVisionDraft } from "../screen/ScreenVisionService";
 import { writeJsonFileAtomically } from "../config/durableJsonFile";
 import { getLocalPetsRootPath } from "../config/petConfigPersistence";
 import { withPetConfigWriteLock } from "../config/petConfigWriteQueue";
@@ -40,6 +43,7 @@ interface ImportSession {
   candidatePetId: string;
   aiDraft?: Omit<AiConnectionDraft, "petId">;
   aiCapability?: AiOutputCapability;
+  aiVisionCapability?: VisionCapability;
   voiceRoot?: string;
   operationId: string;
   signal: AbortSignal;
@@ -263,7 +267,7 @@ export async function beginPetPackageImport(packagePath: string, ownerWebContent
       }
     }
     updatePetPackageProgress(operation.operationId, "import", "validate", total, total, true);
-    return { ok: true, message: "桌宠包检查完成。", sessionId, packageName: path.basename(packagePath), petName: portable.name, avatarDataUrl, requirements: manifest.requirements, contents: { live2d: true, avatar: Boolean(portable.avatar), voice: manifest.entries.some((item) => item.path.startsWith("voice/")), customTheme: portable.uiSettings?.theme === "custom" } };
+    return { ok: true, message: "桌宠包检查完成。", sessionId, packageName: path.basename(packagePath), petName: portable.name, avatarDataUrl, requirements: manifest.requirements, contents: { live2d: true, avatar: Boolean(portable.avatar), voice: manifest.entries.some((item) => item.path.startsWith("voice/")), customTheme: Boolean(portable.uiSettings?.customTheme) } };
   } catch (error) {
     zip?.close();
     await fs.rm(stagingPath, { recursive: true, force: true }).catch(() => undefined);
@@ -284,6 +288,9 @@ function getOwnedSession(sessionId: string, ownerWebContentsId: number): ImportS
 export async function testPetPackageImportAi(request: PetPackageImportAiRequest, ownerWebContentsId: number): Promise<PetPackageImportStepResult> {
   const session = getOwnedSession(request.sessionId, ownerWebContentsId);
   if (!session.manifest.requirements.ai) throw new Error("此桌宠包不需要 AI 配置。");
+  session.aiDraft = undefined;
+  session.aiCapability = undefined;
+  session.aiVisionCapability = undefined;
   const draft = {
     ...request.draft,
     petId: session.candidatePetId,
@@ -295,12 +302,17 @@ export async function testPetPackageImportAi(request: PetPackageImportAiRequest,
   if (!models.models.some((model) => model.id === draft.model)) return { ok: false, message: "所选模型不在服务返回的模型列表中。" };
   const testedDraft = { ...draft, models: models.models };
   const result = await testAiOutputCapability(testedDraft, session.signal);
-  if (result.ok) {
-    const { petId: _petId, ...portableDraft } = testedDraft;
-    session.aiDraft = portableDraft;
-    session.aiCapability = result.capability;
-  }
-  return { ok: result.ok, message: result.message };
+  if (!result.ok) return { ok: false, message: result.message };
+
+  const vision = await testChatVisionDraft(testedDraft, session.signal);
+  if (!vision.ok) return { ok: false, message: vision.message };
+  if (!result.capability || !vision.capability) return { ok: false, message: "AI 能力测试没有返回完整结果。" };
+
+  const { petId: _petId, ...portableDraft } = testedDraft;
+  session.aiDraft = portableDraft;
+  session.aiCapability = result.capability;
+  session.aiVisionCapability = vision.capability;
+  return { ok: true, message: `${result.message} ${vision.message}` };
 }
 
 export async function listPetPackageImportAiModels(request: PetPackageImportAiModelsRequest, ownerWebContentsId: number): Promise<PetPackageImportAiModelsResult> {
@@ -357,7 +369,7 @@ export async function testPetPackageImportVoice(sessionId: string, gptSoVitsRoot
 
 export async function commitPetPackageImport(sessionId: string, ownerWebContentsId: number): Promise<PetPackageImportCommitResult> {
   const session = getOwnedSession(sessionId, ownerWebContentsId);
-  if (session.manifest.requirements.ai && (!session.aiDraft || !session.aiCapability)) return { ok: false, message: "请先完成 AI 配置检测。" };
+  if (session.manifest.requirements.ai && (!session.aiDraft || !session.aiCapability || !session.aiVisionCapability)) return { ok: false, message: "请先完成 AI 和视觉能力检测。" };
   if (session.manifest.requirements.gptSoVits && !session.voiceRoot) return { ok: false, message: "请先完成 GPT-SoVITS 完整目录检测。" };
   updatePetPackageProgress(session.operationId, "import", "commit", 0, 0, false);
   try {
@@ -390,8 +402,10 @@ export async function commitPetPackageImport(sessionId: string, ownerWebContents
             }
           );
           if (!saved.test.ok) throw new Error(saved.test.message);
+          await saveChatVisionCapability(pet.id, session.aiVisionCapability!);
         }
       } catch (error) {
+        if (session.aiVisionCapability) await clearChatVisionCapability(pet.id).catch(() => undefined);
         await deleteAiConnection(pet.id).catch(() => undefined);
         await fs.rename(finalDirectory, session.stagingPath).catch(() => undefined);
         await writeJsonFileAtomically(session.markerPath, { kind: "zmling-import-staging", sessionId: session.id }).catch(() => undefined);

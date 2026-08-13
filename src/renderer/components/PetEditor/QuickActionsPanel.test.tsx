@@ -85,6 +85,15 @@ describe("QuickActionsPanel desktop scale", () => {
     expect(markup).not.toContain('class="settingsRowHeader"');
   });
 
+  it("allows the click-through opacity slider to reach 100%", () => {
+    const markup = renderToStaticMarkup(
+      <QuickActionsPanel pet={createPet()} onDirtyChange={vi.fn()} />
+    );
+
+    expect(markup).toContain('id="click-through-opacity"');
+    expect(markup).toContain('max="100"');
+  });
+
   it("marks changes to size, transparency, or cursor following as unsaved", () => {
     const saved: QuickActionsSettingsValues = {
       clickThroughOpacity: 0.45,

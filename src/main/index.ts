@@ -26,6 +26,9 @@ import { startupProfiler } from "./startupProfiler";
 import { presetVoiceGenerationService } from "./services/presetVoice/PresetVoiceGenerationService";
 import { cleanupInterruptedPetPackageImports, shutdownPetPackageImports } from "./services/petPackage/petPackageImportService";
 import { cancelAllPetPackageOperations } from "./services/petPackage/petPackageOperation";
+import { screenCaptureService } from "./services/screen/ScreenCaptureService";
+import { decideScreenPermission } from "./services/screen/screenCapturePermissions";
+import { stopLocalHelpServer } from "./services/help/localHelpServer";
 
 let mainWindow: Electron.BrowserWindow | null = null;
 let isQuitting = false;
@@ -56,6 +59,8 @@ protocol.registerSchemesAsPrivileged([
 
 async function runShutdownCleanup(): Promise<void> {
   const cleanup = (async () => {
+    await screenCaptureService.stopAll();
+    await stopLocalHelpServer();
     cancelAllPetPackageOperations();
     await shutdownPetPackageImports();
     stopManagedGptSoVitsApi();
@@ -211,16 +216,13 @@ if (!gotLock) {
               permission === "media" && "mediaTypes" in details && Array.isArray(details.mediaTypes)
                 ? details.mediaTypes
                 : [];
-            const isAudioOnlyRequest =
-              mediaTypes.length > 0 && mediaTypes.every((mediaType) => mediaType === "audio");
+            const isPetWindow = isPetWindowWebContents(webContents);
+            const decision = decideScreenPermission(permission, mediaTypes, isPetWindow);
 
-            callback(
-              permission === "media" &&
-                isAudioOnlyRequest &&
-                isPetWindowWebContents(webContents)
-            );
+            callback(decision.allowed);
           }
         );
+        screenCaptureService.configureDisplayMediaHandler(session.defaultSession);
       }
     );
     mainWindow = startupProfiler.measureSyncOnce(

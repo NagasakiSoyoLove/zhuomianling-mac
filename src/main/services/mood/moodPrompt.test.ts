@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMoodSystemPrompt } from "./moodPrompt";
+import { buildMoodBehaviorPrompt, buildMoodSystemPrompt } from "./moodPrompt";
 
 describe("mood system prompt", () => {
   it("describes mood behavior without duplicating the output protocol", () => {
@@ -18,5 +18,13 @@ describe("mood system prompt", () => {
     expect(calm).toContain("保持稳定、自然、适度克制的日常情绪");
     expect(calm).not.toContain("与平静状态的差异");
     expect(buildMoodSystemPrompt("joyful")).toContain("当前回复须自然体现以下心情表现：");
+  });
+
+  // TIMED DIAGNOSTICS TEST MODULE: automatic-monitor mood overlay coverage.
+  it("provides a protocol-free mood overlay for screen monitoring", () => {
+    const prompt = buildMoodBehaviorPrompt("joyful");
+    expect(prompt).toContain("当前心情优先于人设中的一般语气");
+    expect(prompt).toContain("当前回复须自然体现以下心情表现：");
+    expect(prompt).not.toContain("moodDelta");
   });
 });

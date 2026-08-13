@@ -1,0 +1,976 @@
+/* TIMED DIAGNOSTICS TEST MODULE: paged charts and data-dense diagnostics UI. */
+.timedDiagnosticsTestPage {
+  --diag-ink: #17202a;
+  --diag-muted: #687789;
+  --diag-soft: #edf2f7;
+  --diag-line: rgba(23, 32, 42, 0.1);
+  --diag-card: rgba(255, 255, 255, 0.86);
+  --diag-blue: #2778d8;
+  --diag-purple: #7157d8;
+  --diag-teal: #168d91;
+  --diag-amber: #c67819;
+  display: grid;
+  min-height: 100vh;
+  align-content: start;
+  gap: 16px;
+  padding: 22px 26px 20px;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(92, 143, 240, 0.14), transparent 28%),
+    radial-gradient(circle at 96% 10%, rgba(145, 113, 224, 0.13), transparent 27%),
+    #f5f7fb;
+  color: var(--diag-ink);
+}
+
+.timedDiagnosticsPageHeader,
+.timedDiagnosticsPageHeading,
+.timedDiagnosticsPageActions,
+.timedDiagnosticsEyebrow,
+.timedDiagnosticsLiveBadge,
+.timedDiagnosticsClearButton,
+.timedDiagnosticsBackButton,
+.timedDiagnosticsDashboardHeader,
+.timedDiagnosticsDashboardTitle,
+.timedDiagnosticsDashboardStatus,
+.timedDiagnosticsChartHeader,
+.timedDiagnosticsChartTitle,
+.timedDiagnosticsThresholdBanner,
+.timedDiagnosticsFooter,
+.timedDiagnosticsInfoHeader,
+.timedDiagnosticsHistoryTopline {
+  display: flex;
+  align-items: center;
+}
+
+.timedDiagnosticsPageHeader {
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.timedDiagnosticsPageHeading {
+  min-width: 0;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.timedDiagnosticsPageHeading h1,
+.timedDiagnosticsPageHeading p,
+.timedDiagnosticsDashboardTitle h2,
+.timedDiagnosticsDashboardTitle p,
+.timedDiagnosticsChartTitle h2,
+.timedDiagnosticsChartTitle p,
+.timedDiagnosticsInfoHeader h2,
+.timedDiagnosticsInfoHeader p {
+  margin: 0;
+}
+
+.timedDiagnosticsPageHeading h1 {
+  font-size: 30px;
+  letter-spacing: -0.025em;
+}
+
+.timedDiagnosticsPageHeading > div > p:last-child {
+  max-width: 720px;
+  margin-top: 5px;
+  color: var(--diag-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.timedDiagnosticsEyebrow {
+  gap: 6px;
+  margin-bottom: 5px !important;
+  color: var(--diag-blue);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.timedDiagnosticsBackButton,
+.timedDiagnosticsClearButton {
+  min-height: 40px;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--diag-line);
+  border-radius: 11px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #344255;
+  font-weight: 850;
+  cursor: pointer;
+  transition: border-color 180ms ease, background 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.timedDiagnosticsBackButton {
+  flex: 0 0 auto;
+}
+
+.timedDiagnosticsBackButton:hover,
+.timedDiagnosticsClearButton:hover {
+  border-color: rgba(38, 132, 255, 0.35);
+  background: #fff;
+  color: #1766c2;
+  transform: translateY(-1px);
+}
+
+.timedDiagnosticsBackButton:focus-visible,
+.timedDiagnosticsClearButton:focus-visible,
+.timedDiagnosticsTab:focus-visible {
+  outline: 3px solid rgba(39, 120, 216, 0.26);
+  outline-offset: 2px;
+}
+
+.timedDiagnosticsPageActions {
+  flex: 0 0 auto;
+  gap: 9px;
+}
+
+.timedDiagnosticsLiveBadge,
+.timedDiagnosticsCount,
+.timedDiagnosticsStatus,
+.timedDiagnosticsNoDataBadge {
+  gap: 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.timedDiagnosticsLiveBadge {
+  min-height: 30px;
+  padding: 0 10px;
+  background: #e7f7ed;
+  color: #24783b;
+}
+
+.timedDiagnosticsLiveBadge i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #38a35a;
+  box-shadow: 0 0 0 4px rgba(56, 163, 90, 0.13);
+}
+
+.timedDiagnosticsTabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+  padding: 7px;
+  border: 1px solid rgba(23, 32, 42, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 12px 25px rgba(28, 39, 54, 0.05);
+}
+
+.timedDiagnosticsTab {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 58px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 8px 11px;
+  background: transparent;
+  color: #667588;
+  text-align: left;
+  cursor: pointer;
+  transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.timedDiagnosticsTab:hover {
+  border-color: rgba(39, 120, 216, 0.18);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--diag-ink);
+  transform: translateY(-1px);
+}
+
+.timedDiagnosticsTab.is-active {
+  border-color: rgba(39, 120, 216, 0.2);
+  background: #fff;
+  box-shadow: 0 7px 18px rgba(44, 76, 116, 0.1);
+  color: var(--diag-ink);
+}
+
+.timedDiagnosticsTabIcon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 10px;
+  background: #e9f2ff;
+  color: var(--diag-blue);
+}
+
+.timedDiagnosticsTab-chat .timedDiagnosticsTabIcon {
+  background: #e9f2ff;
+  color: var(--diag-blue);
+}
+
+.timedDiagnosticsTab-vision .timedDiagnosticsTabIcon {
+  background: #e6f7f5;
+  color: var(--diag-teal);
+}
+
+.timedDiagnosticsTab-monitor .timedDiagnosticsTabIcon {
+  background: #fff1e1;
+  color: var(--diag-amber);
+}
+
+.timedDiagnosticsTab-startup .timedDiagnosticsTabIcon {
+  background: #f0ecff;
+  color: var(--diag-purple);
+}
+
+.timedDiagnosticsTabText {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.timedDiagnosticsTabText strong {
+  overflow: hidden;
+  color: inherit;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timedDiagnosticsTabText small {
+  color: #8995a4;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.timedDiagnosticsTabAlert {
+  display: grid;
+  min-width: 21px;
+  height: 21px;
+  margin-left: auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff0ed;
+  color: #b42318;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.timedDiagnosticsDashboard {
+  display: grid;
+  gap: 15px;
+  min-width: 0;
+  border: 1px solid rgba(23, 32, 42, 0.09);
+  border-radius: 18px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 17px 36px rgba(28, 39, 54, 0.07);
+}
+
+.timedDiagnosticsDashboardHeader {
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.timedDiagnosticsDashboardTitle {
+  min-width: 0;
+  gap: 12px;
+}
+
+.timedDiagnosticsDashboardIcon {
+  display: grid;
+  width: 43px;
+  height: 43px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 13px;
+  background: #f0ecff;
+  color: var(--diag-purple);
+}
+
+.timedDiagnosticsDashboard-chat .timedDiagnosticsDashboardIcon {
+  background: #e9f2ff;
+  color: var(--diag-blue);
+}
+
+.timedDiagnosticsDashboard-vision .timedDiagnosticsDashboardIcon {
+  background: #e6f7f5;
+  color: var(--diag-teal);
+}
+
+.timedDiagnosticsDashboard-monitor .timedDiagnosticsDashboardIcon {
+  background: #fff1e1;
+  color: var(--diag-amber);
+}
+
+.timedDiagnosticsSectionKicker {
+  color: var(--diag-blue);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.timedDiagnosticsDashboardTitle h2 {
+  margin-top: 2px;
+  font-size: 21px;
+  letter-spacing: -0.02em;
+}
+
+.timedDiagnosticsDashboardTitle p:last-child {
+  max-width: 760px;
+  margin-top: 4px;
+  color: var(--diag-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.timedDiagnosticsDashboardStatus {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  color: #7b8795;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.timedDiagnosticsNoDataBadge {
+  padding: 5px 8px;
+  background: #edf2f7;
+  color: #7b8795;
+}
+
+.timedDiagnosticsMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.timedDiagnosticsMetric {
+  display: grid;
+  min-width: 0;
+  min-height: 73px;
+  align-content: center;
+  gap: 5px;
+  border: 1px solid rgba(23, 32, 42, 0.08);
+  border-radius: 13px;
+  padding: 11px 13px;
+  background: rgba(248, 250, 253, 0.9);
+}
+
+.timedDiagnosticsMetric span {
+  overflow: hidden;
+  color: var(--diag-muted);
+  font-size: 10px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timedDiagnosticsMetric strong {
+  overflow-wrap: anywhere;
+  color: var(--diag-ink);
+  font-size: 18px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.timedDiagnosticsMetric:nth-child(3) strong {
+  font-size: 14px;
+}
+
+.timedDiagnosticsMetric.tone-warning strong {
+  color: #9b650f;
+}
+
+.timedDiagnosticsMetric.tone-danger strong {
+  color: #b42318;
+}
+
+.timedDiagnosticsThresholdBanner {
+  flex-wrap: wrap;
+  gap: 8px;
+  border: 1px solid rgba(198, 120, 25, 0.2);
+  border-radius: 12px;
+  padding: 9px 12px;
+  background: rgba(255, 246, 230, 0.82);
+  color: #8f5d13;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.timedDiagnosticsThresholdBanner strong {
+  color: #9a5e08;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.timedDiagnosticsThresholdBanner small {
+  margin-left: auto;
+  color: #a47e4a;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.timedDiagnosticsChartsGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+  gap: 12px;
+}
+
+.timedDiagnosticsChartCard,
+.timedDiagnosticsInfoCard {
+  min-width: 0;
+  border: 1px solid rgba(23, 32, 42, 0.08);
+  border-radius: 15px;
+  background: var(--diag-card);
+  box-shadow: 0 10px 24px rgba(28, 39, 54, 0.045);
+}
+
+.timedDiagnosticsChartCard {
+  display: grid;
+  min-height: 318px;
+  align-content: start;
+  gap: 10px;
+  padding: 14px;
+}
+
+.timedDiagnosticsChartHeader {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.timedDiagnosticsChartTitle {
+  min-width: 0;
+  gap: 9px;
+}
+
+.timedDiagnosticsChartIcon {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 9px;
+  background: #edf2ff;
+  color: var(--diag-blue);
+}
+
+.timedDiagnosticsChartTitle h2 {
+  font-size: 14px;
+}
+
+.timedDiagnosticsChartTitle p {
+  margin-top: 3px;
+  color: #83909e;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.timedDiagnosticsSvgChartWrap {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.timedDiagnosticsSvgChart {
+  display: block;
+  width: 100%;
+  height: 244px;
+  overflow: visible;
+}
+
+.timedDiagnosticsChartGridline {
+  stroke: #e7edf4;
+  stroke-dasharray: 3 5;
+  stroke-width: 1;
+}
+
+.timedDiagnosticsChartAxis {
+  stroke: #cdd8e5;
+  stroke-width: 1;
+}
+
+.timedDiagnosticsChartAxisLabel,
+.timedDiagnosticsChartXLabel {
+  fill: #8a96a3;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.timedDiagnosticsChartXLabel {
+  fill: #718096;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.timedDiagnosticsChartArea {
+  fill: rgba(39, 120, 216, 0.1);
+}
+
+.timedDiagnosticsChartLine {
+  fill: none;
+  stroke: var(--diag-purple);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.timedDiagnosticsChartLine-startup {
+  stroke: var(--diag-purple);
+}
+
+.timedDiagnosticsChartLine-chat {
+  stroke: var(--diag-blue);
+}
+
+.timedDiagnosticsChartLine-vision {
+  stroke: var(--diag-teal);
+}
+
+.timedDiagnosticsChartLine-monitor {
+  stroke: var(--diag-amber);
+}
+
+.timedDiagnosticsChartPoint {
+  fill: #fff;
+  stroke: var(--diag-purple);
+  stroke-width: 3;
+}
+
+.timedDiagnosticsChartPoint-completed {
+  stroke: #2b9a58;
+}
+
+.timedDiagnosticsChartPoint-failed,
+.timedDiagnosticsChartPoint-timeout {
+  stroke: #c34135;
+}
+
+.timedDiagnosticsChartValue {
+  fill: #52606d;
+  font-size: 10px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.timedDiagnosticsChartLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: #7e8a99;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.timedDiagnosticsLegendSwatch {
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+  margin-right: 4px;
+  vertical-align: middle;
+  border-radius: 99px;
+  background: var(--diag-purple);
+}
+
+.timedDiagnosticsLegendSwatch-chat { background: var(--diag-blue); }
+.timedDiagnosticsLegendSwatch-vision { background: var(--diag-teal); }
+.timedDiagnosticsLegendSwatch-monitor { background: var(--diag-amber); }
+
+.timedDiagnosticsStageChart {
+  display: grid;
+  max-height: 274px;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+  padding: 5px 2px 0;
+}
+
+.timedDiagnosticsStageRow {
+  display: grid;
+  grid-template-columns: minmax(115px, 1.1fr) minmax(110px, 1.7fr) auto;
+  gap: 9px;
+  align-items: center;
+}
+
+.timedDiagnosticsStageLabel {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.timedDiagnosticsStageLabel span {
+  overflow: hidden;
+  color: #3e4c5c;
+  font-size: 10px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timedDiagnosticsStageLabel small {
+  color: #929daa;
+  font-size: 9px;
+}
+
+.timedDiagnosticsStageTrack {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #e9eef4;
+}
+
+.timedDiagnosticsStageBar {
+  display: block;
+  min-width: 4px;
+  height: 100%;
+  border-radius: 99px;
+  background: var(--diag-purple);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
+.timedDiagnosticsStageBar-chat { background: var(--diag-blue); }
+.timedDiagnosticsStageBar-vision { background: var(--diag-teal); }
+.timedDiagnosticsStageBar-monitor { background: var(--diag-amber); }
+.timedDiagnosticsStageBar.is-bad { background: #c34135; }
+
+.timedDiagnosticsStageRow strong {
+  min-width: 46px;
+  color: #536273;
+  font-size: 10px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.timedDiagnosticsStageAxis {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid rgba(23, 32, 42, 0.08);
+  padding-top: 8px;
+  color: #8a96a3;
+  font-size: 9px;
+}
+
+.timedDiagnosticsEmptyChart {
+  display: grid;
+  min-height: 230px;
+  align-content: center;
+  justify-items: center;
+  gap: 7px;
+  color: #9aa6b4;
+  text-align: center;
+}
+
+.timedDiagnosticsEmptyChart strong {
+  color: #697788;
+  font-size: 12px;
+}
+
+.timedDiagnosticsEmptyChart span {
+  max-width: 270px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.timedDiagnosticsInfoCard {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 14px;
+}
+
+.timedDiagnosticsStartupListCard,
+.timedDiagnosticsHistoryCard {
+  min-height: 190px;
+}
+
+.timedDiagnosticsInfoHeader {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.timedDiagnosticsInfoHeader > svg {
+  flex: 0 0 auto;
+  color: #718096;
+}
+
+.timedDiagnosticsInfoHeader h2 {
+  color: #344255;
+  font-size: 14px;
+}
+
+.timedDiagnosticsInfoHeader p {
+  margin-top: 3px;
+  color: #85919f;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.timedDiagnosticsCount {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  background: #edf2f7;
+  color: #607080;
+}
+
+.timedDiagnosticsInfoList {
+  display: grid;
+  gap: 9px;
+  border-top: 1px solid rgba(23, 32, 42, 0.07);
+  padding-top: 11px;
+  color: #657486;
+  font-size: 11px;
+}
+
+.timedDiagnosticsInfoList span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timedDiagnosticsInfoDot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.timedDiagnosticsInfoDot.is-blue { background: var(--diag-blue); }
+.timedDiagnosticsInfoDot.is-purple { background: var(--diag-purple); }
+.timedDiagnosticsInfoDot.is-green { background: #2b9a58; }
+
+.timedDiagnosticsHistoryList,
+.timedDiagnosticsStartupList {
+  display: grid;
+  max-height: 310px;
+  gap: 8px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.timedDiagnosticsHistoryRow {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  border: 1px solid rgba(23, 32, 42, 0.07);
+  border-radius: 11px;
+  padding: 10px;
+  background: rgba(247, 249, 252, 0.8);
+  cursor: pointer;
+  transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.timedDiagnosticsHistoryRow:hover {
+  border-color: rgba(39, 120, 216, 0.28);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 5px 14px rgba(39, 77, 125, 0.08);
+  transform: translateY(-1px);
+}
+
+.timedDiagnosticsHistoryRow:focus-visible {
+  outline: 3px solid rgba(39, 120, 216, 0.24);
+  outline-offset: 2px;
+}
+
+.timedDiagnosticsHistoryRow.is-selected {
+  border-color: rgba(39, 120, 216, 0.62);
+  background: linear-gradient(105deg, rgba(235, 244, 255, 0.98), rgba(255, 255, 255, 0.98));
+  box-shadow: inset 3px 0 0 var(--diag-blue), 0 7px 18px rgba(39, 120, 216, 0.1);
+}
+
+.timedDiagnosticsHistoryRow.is-selected .timedDiagnosticsHistoryIndex {
+  color: #1766c2;
+}
+
+.timedDiagnosticsHistoryTopline {
+  gap: 8px;
+}
+
+.timedDiagnosticsHistoryIndex {
+  color: #536273;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.timedDiagnosticsHistoryTopline > strong {
+  margin-left: auto;
+  color: #273545;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.timedDiagnosticsStatus {
+  padding: 4px 7px;
+}
+
+.timedDiagnosticsStatus.completed {
+  background: #e7f7ed;
+  color: #24783b;
+}
+
+.timedDiagnosticsStatus.running {
+  background: #eaf2ff;
+  color: #1766c2;
+}
+
+.timedDiagnosticsStatus.failed,
+.timedDiagnosticsStatus.timeout {
+  background: #fff0ed;
+  color: #b42318;
+}
+
+.timedDiagnosticsRunTimeline {
+  display: flex;
+  height: 8px;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #e4e9ef;
+}
+
+.timedDiagnosticsRunTimeline span {
+  min-width: 3px;
+  border-radius: 99px;
+  background: var(--diag-blue);
+}
+
+.timedDiagnosticsRunTimeline span.bad {
+  background: #c34135;
+}
+
+.timedDiagnosticsHistoryMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 11px;
+  color: #7a8795;
+  font-size: 10px;
+}
+
+.timedDiagnosticsHistoryMeta span:first-child {
+  color: #52606d;
+  font-weight: 850;
+}
+
+.timedDiagnosticsStartupListRow {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  border-bottom: 1px solid rgba(23, 32, 42, 0.055);
+  padding: 4px 2px 8px;
+}
+
+.timedDiagnosticsStartupListRow:last-child {
+  border-bottom: 0;
+}
+
+.timedDiagnosticsStartupListDot {
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--diag-purple);
+  border-radius: 50%;
+  background: #fff;
+}
+
+.timedDiagnosticsStartupListDot.is-bad {
+  border-color: #c34135;
+  background: #ffe9e5;
+}
+
+.timedDiagnosticsStartupListRow div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.timedDiagnosticsStartupListRow strong {
+  overflow: hidden;
+  color: #3e4c5c;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timedDiagnosticsStartupListRow small {
+  color: #8a96a3;
+  font-size: 9px;
+}
+
+.timedDiagnosticsStartupListRow b {
+  min-width: 48px;
+  color: #59697a;
+  font-size: 10px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.timedDiagnosticsFooter {
+  justify-content: center;
+  gap: 6px;
+  color: #8a96a3;
+  font-size: 11px;
+}
+
+.timedDiagnosticsSpin {
+  animation: timed-diagnostics-spin 1s linear infinite;
+}
+
+@keyframes timed-diagnostics-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 840px) {
+  .timedDiagnosticsTestPage {
+    padding: 18px;
+  }
+
+  .timedDiagnosticsPageHeader,
+  .timedDiagnosticsDashboardHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .timedDiagnosticsPageActions,
+  .timedDiagnosticsDashboardStatus {
+    align-self: stretch;
+    justify-content: space-between;
+  }
+
+  .timedDiagnosticsChartsGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 660px) {
+  .timedDiagnosticsTabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .timedDiagnosticsMetricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .timedDiagnosticsTab {
+    min-height: 52px;
+  }
+
+  .timedDiagnosticsDashboard {
+    padding: 14px;
+  }
+
+  .timedDiagnosticsStageRow {
+    grid-template-columns: minmax(100px, 1.1fr) minmax(80px, 1.4fr) auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timedDiagnosticsSpin,
+  .timedDiagnosticsBackButton,
+  .timedDiagnosticsClearButton,
+  .timedDiagnosticsTab,
+  .timedDiagnosticsHistoryRow {
+    animation: none;
+    transition: none;
+  }
+}

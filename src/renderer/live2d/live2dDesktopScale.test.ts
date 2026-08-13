@@ -79,8 +79,9 @@ describe("Live2D desktop scale integration", () => {
       source.indexOf("const idleTimerRef")
     );
 
-    expect(cursorSubscription).toContain("point.windowX >= bounds.left");
-    expect(cursorSubscription).toContain("point.windowY >= bounds.top");
+    expect(cursorSubscription).toContain("isPointInsideElement(windowPoint, petArea)");
+    expect(cursorSubscription).toContain("isPointInsideElement(windowPoint, clickThroughButton)");
+    expect(source).toContain("clickThroughControlVisible");
     expect(cursorSubscription).toContain("setClickThroughControlInteractive(");
     expect(source).not.toContain('window.addEventListener("mousemove", handleMouseMove)');
   });

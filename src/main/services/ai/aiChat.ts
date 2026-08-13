@@ -7,9 +7,15 @@ import type {
   AiChatStreamCancelResult,
   AiChatStreamRequest,
   AiChatStreamEvent,
-  AiOutputMode
+  AiOutputMode,
+  AiProtocolTier
 } from "../../../shared/types/ai";
-import type { PetDefinition } from "../../../shared/types/pet";
+import type {
+  ScreenVisionTimingPhase,
+  ScreenVisionTimingStage
+} from "../../../shared/types/screen";
+import type { PetMoodRangeId } from "../../../shared/mood";
+import type { PetDefinition, PetReplyLength } from "../../../shared/types/pet";
 import { parseFinalAiReply, type NormalizedAiReply } from "../../../shared/aiReply";
 import {
   SecureStorageCorruptedError,
@@ -21,6 +27,7 @@ import { captureCompletedAiTurn } from "../memory/memoryCapture";
 import { AiStreamNormalizer } from "./aiStreamNormalizer";
 import {
   buildAiChatRequestBody,
+  buildAiProviderMessage,
   buildChatCompletionsUrl,
   canFallbackAiOutputMode,
   getAiOutputModeFallbacks
@@ -29,12 +36,14 @@ import { moodService } from "../mood/MoodService";
 import { buildMoodSystemPrompt } from "../mood/moodPrompt";
 import { registerMoodTextToSpeechSnapshot } from "../speech/textToSpeech";
 import {
+  AI_PROMPT_LIMITS,
   createAiReplyContractForPet,
   getAiProtocolTierForMode,
   type AiReplyContract
 } from "../../../shared/aiContract";
 import { getLocalPetDefinition } from "../config/petConfigStore";
 import { buildAuthoritativeAiSystemPrompt } from "./aiPrompt";
+import { screenVisionTiming } from "../screen/ScreenVisionTiming";
 
 interface ChatCompletionResponse {
   choices?: Array<{
@@ -79,8 +88,12 @@ function getAiSettingsErrorMessage(error: unknown): string {
 function normalizeConversationMessages(messages: AiChatMessage[]): AiChatMessage[] {
   return messages
     .filter((message) => message.role !== "system")
-    .map((message) => ({ role: message.role, content: message.content.trim() }))
-    .filter((message) => message.content.length > 0)
+    .map((message) => ({
+      role: message.role,
+      content: message.content.trim(),
+      ...(message.image ? { image: message.image } : {})
+    }))
+    .filter((message) => message.content.length > 0 || Boolean(message.image))
     .slice(-15);
 }
 
@@ -116,6 +129,8 @@ function buildMessagesForMode(options: {
   mode: AiOutputMode;
   moodContext: string;
   memoryContext?: string;
+  systemPromptAppendix?: string;
+  replyLengthOverride?: PetReplyLength;
 }): { messages: AiChatMessage[]; contract: AiReplyContract } {
   const contract = createAiReplyContractForPet(
     options.pet,
@@ -125,19 +140,29 @@ function buildMessagesForMode(options: {
     role: message.role,
     content: message.role === "assistant"
       ? normalizeAssistantContentForContract(message.content, contract)
-      : message.content
+      : message.content,
+    ...(message.image ? { image: message.image } : {})
   }));
+  const authoritativePrompt = buildAuthoritativeAiSystemPrompt({
+    pet: options.pet,
+    contract,
+    moodContext: options.moodContext,
+    memoryContext: options.memoryContext,
+    replyLengthOverride: options.replyLengthOverride
+  });
+  const appendix = options.systemPromptAppendix?.trim();
+  const remainingAppendixCharacters = Math.max(
+    0,
+    AI_PROMPT_LIMITS.systemPromptCharacters - authoritativePrompt.length - 2
+  );
   return {
     contract,
     messages: [
       {
         role: "system",
-        content: buildAuthoritativeAiSystemPrompt({
-          pet: options.pet,
-          contract,
-          moodContext: options.moodContext,
-          memoryContext: options.memoryContext
-        })
+        content: appendix && remainingAppendixCharacters > 0
+          ? `${authoritativePrompt}\n\n${appendix.slice(0, remainingAppendixCharacters)}`
+          : authoritativePrompt
       },
       ...conversation
     ]
@@ -154,6 +179,16 @@ interface AiCompletionFetchResult {
 type ResolvedAiConfig = NonNullable<Awaited<ReturnType<typeof getAiConnectionConfig>>>;
 
 const runtimeOutputCapabilities = new Map<string, NonNullable<ResolvedAiConfig["outputCapability"]>>();
+
+// TIMED DIAGNOSTICS TEST MODULE: bounded chat/visual timing instrumentation.
+function markChatTiming(
+  requestId: string,
+  phase: ScreenVisionTimingPhase,
+  stage: ScreenVisionTimingStage,
+  ok = true
+): void {
+  screenVisionTiming.mark(requestId, phase, stage, ok, "chat");
+}
 
 function getRuntimeCapabilityKey(config: ResolvedAiConfig): string {
   return `${config.petId}\0${config.baseUrl}\0${config.model}`;
@@ -204,8 +239,11 @@ async function fetchAiCompletion(options: {
   pet: PetDefinition;
   moodContext: string;
   memoryContext?: string;
+  systemPromptAppendix?: string;
+  replyLengthOverride?: PetReplyLength;
   streaming: boolean;
   signal?: AbortSignal;
+  onTiming?: (stage: ScreenVisionTimingStage, ok?: boolean) => void;
 }): Promise<AiCompletionFetchResult> {
   const preferred = getPreferredOutput(options.config);
   const modes = getAiOutputModeFallbacks(preferred.mode);
@@ -224,9 +262,13 @@ async function fetchAiCompletion(options: {
         pet: options.pet,
         mode,
         moodContext: options.moodContext,
-        memoryContext: options.memoryContext
+        memoryContext: options.memoryContext,
+        systemPromptAppendix: options.systemPromptAppendix,
+        replyLengthOverride: options.replyLengthOverride
       });
       lastContract = prepared.contract;
+      options.onTiming?.("request-body-ready");
+      options.onTiming?.("model-request-started");
       const response = await fetch(buildChatCompletionsUrl(options.config.baseUrl), {
         method: "POST",
         headers: {
@@ -298,6 +340,8 @@ async function repairAiReplyFormat(options: {
   contract: AiReplyContract;
   moodContext: string;
   memoryContext?: string;
+  systemPromptAppendix?: string;
+  replyLengthOverride?: PetReplyLength;
   visibleReply: string;
   signal?: AbortSignal;
 }): Promise<NormalizedAiReply | undefined> {
@@ -309,7 +353,9 @@ async function repairAiReplyFormat(options: {
     pet: options.pet,
     mode: options.mode,
     moodContext: options.moodContext,
-    memoryContext: options.memoryContext
+    memoryContext: options.memoryContext,
+    systemPromptAppendix: options.systemPromptAppendix,
+    replyLengthOverride: options.replyLengthOverride
   });
   prepared.messages.push(
     { role: "assistant", content: options.visibleReply },
@@ -373,7 +419,46 @@ function recordRuntimeCapability(
   void rememberRuntimeCapability(config, mode, streaming, "tested");
 }
 
-export async function sendAiChat(request: AiChatRequest): Promise<AiChatResponse> {
+export interface AiChatReplyChunk {
+  content: string;
+  voiceText?: string;
+  protocolTier: AiProtocolTier;
+}
+
+export interface AiChatResponseOptions {
+  onChunk?: (chunk: AiChatReplyChunk) => void;
+  moodRangeId?: PetMoodRangeId;
+  systemPromptAppendix?: string;
+  replyLengthOverride?: PetReplyLength;
+}
+
+export interface AiCompletionRequest {
+  petId: string;
+  systemPrompt: string;
+  messages: AiChatMessage[];
+}
+
+export interface AiCompletionOptions {
+  streaming?: boolean;
+  onTextDelta?: (delta: string) => boolean | void;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface AiCompletionResult {
+  ok: boolean;
+  message: string;
+  text?: string;
+  streaming?: boolean;
+  canceled?: boolean;
+  status?: number;
+}
+
+export async function sendAiChat(
+  request: AiChatRequest,
+  signal?: AbortSignal,
+  options: AiChatResponseOptions = {}
+): Promise<AiChatResponse> {
   let config: Awaited<ReturnType<typeof getAiConnectionConfig>>;
 
   try {
@@ -403,25 +488,165 @@ export async function sendAiChat(request: AiChatRequest): Promise<AiChatResponse
 
   let response: Response;
   let responseContract: AiReplyContract;
+  let responseMode: AiOutputMode = "plain-text";
+  let requestedStreaming = false;
+  let pet: PetDefinition | undefined;
+  const moodRangeId = options.moodRangeId ?? "calm";
+  const systemPromptAppendix = options.systemPromptAppendix;
+  const replyLengthOverride = options.replyLengthOverride;
 
   try {
-    const pet = await getLocalPetDefinition(request.petId);
+    pet = await getLocalPetDefinition(request.petId);
     if (!pet) {
       return { ok: false, message: "当前桌宠配置不存在。" };
     }
+    // Visual fallback replies must use the result of the explicit LLM output
+    // capability test. An old or untested configuration deliberately stays on
+    // the complete-response path.
+    requestedStreaming = Boolean(
+      options.onChunk &&
+      config.outputCapability?.confidence === "tested" &&
+      config.outputCapability.streaming
+    );
     const fetched = await fetchAiCompletion({
       config,
       conversationMessages: messages,
       pet,
-      moodContext: buildMoodSystemPrompt("calm"),
-      streaming: false
+      moodContext: buildMoodSystemPrompt(moodRangeId),
+      systemPromptAppendix,
+      replyLengthOverride,
+      streaming: requestedStreaming,
+      signal
     });
     response = fetched.response;
     responseContract = fetched.contract;
+    responseMode = fetched.mode;
+    requestedStreaming = requestedStreaming && fetched.streaming;
   } catch {
     return {
       ok: false,
       message: "无法连接 AI 服务，请检查网络或本地服务状态。"
+    };
+  }
+
+  if (!response.ok) {
+    let message = `AI 请求失败，状态码 ${response.status}。`;
+    try {
+      const body = (await response.json()) as ChatCompletionResponse;
+      message = body.error?.message ?? message;
+    } catch {
+      // Keep the status-based message.
+    }
+    return { ok: false, message };
+  }
+
+  const contentType = response.headers?.get?.("Content-Type")?.toLowerCase() ?? "";
+  const isStreamingResponse = Boolean(
+    requestedStreaming &&
+    response.body &&
+    !contentType.includes("application/json")
+  );
+
+  if (isStreamingResponse) {
+    const responseBody = response.body;
+    if (!responseBody) {
+      return { ok: false, message: "AI 流式回复没有返回可读取的数据。" };
+    }
+    const reader = responseBody.getReader();
+    const decoder = new TextDecoder();
+    const normalizer = new AiStreamNormalizer(responseContract);
+    let buffer = "";
+    let streamError: string | undefined;
+
+    const processSseLine = (rawLine: string): boolean => {
+      const line = rawLine.trim();
+      if (!line.startsWith("data:")) return true;
+      const data = line.slice(5).trim();
+      if (!data || data === "[DONE]") return true;
+
+      const { delta, error } = readStreamChunkDelta(data);
+      if (error) {
+        streamError = error;
+        return false;
+      }
+      if (!delta) return true;
+
+      const snapshot = normalizer.append(delta);
+      if (snapshot.overflowed) {
+        streamError = "AI 返回内容过长，已停止本次回复。";
+        return false;
+      }
+      if (snapshot.changed) {
+        options.onChunk?.({
+          content: snapshot.reply,
+          ...(snapshot.voiceText ? { voiceText: snapshot.voiceText } : {}),
+          protocolTier: responseContract.tier
+        });
+      }
+      return true;
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!processSseLine(line)) {
+            await reader.cancel(streamError ?? "AI stream failed").catch(() => undefined);
+            break;
+          }
+        }
+        if (streamError) break;
+      }
+      if (!streamError) {
+        buffer += decoder.decode();
+        if (buffer) processSseLine(buffer);
+      }
+    } catch {
+      await reader.cancel("AI stream interrupted").catch(() => undefined);
+      return { ok: false, message: "AI 流式回复中断，请稍后再试。" };
+    } finally {
+      reader.releaseLock?.();
+    }
+
+    if (streamError) return { ok: false, message: streamError };
+    if (!normalizer.hasContent()) {
+      return { ok: false, message: "AI 没有返回可显示的回复。" };
+    }
+
+    let parsedReply = normalizer.finalize();
+    if (!parsedReply.reply) {
+      return {
+        ok: false,
+        message: "AI 返回的回复格式无法识别，请重试或切换兼容模式。"
+      };
+    }
+    if (responseContract.tier === "full" && parsedReply.quality !== "structured") {
+      if (pet) {
+        const repaired = await repairAiReplyFormat({
+          config,
+          conversationMessages: messages,
+          pet,
+          mode: responseMode,
+          contract: responseContract,
+          moodContext: buildMoodSystemPrompt(moodRangeId),
+          systemPromptAppendix,
+          replyLengthOverride,
+          visibleReply: parsedReply.reply,
+          signal
+        });
+        if (repaired) parsedReply = repaired;
+      }
+    }
+    return {
+      ok: true,
+      message: "ok",
+      content: parsedReply.reply,
+      emotion: parsedReply.emotion,
+      voiceText: parsedReply.voiceText
     };
   }
 
@@ -436,13 +661,6 @@ export async function sendAiChat(request: AiChatRequest): Promise<AiChatResponse
     };
   }
 
-  if (!response.ok) {
-    return {
-      ok: false,
-      message: body.error?.message ?? `AI 请求失败，状态码 ${response.status}。`
-    };
-  }
-
   const content = body.choices?.[0]?.message?.content?.trim();
 
   if (!content) {
@@ -452,7 +670,7 @@ export async function sendAiChat(request: AiChatRequest): Promise<AiChatResponse
     };
   }
 
-  const parsedReply = parseFinalAiReply(content, responseContract);
+  let parsedReply = parseFinalAiReply(content, responseContract);
 
   if (!parsedReply.reply) {
     return {
@@ -468,6 +686,200 @@ export async function sendAiChat(request: AiChatRequest): Promise<AiChatResponse
     emotion: parsedReply.emotion,
     voiceText: parsedReply.voiceText
   };
+}
+
+const maxCustomCompletionCharacters = 128 * 1024;
+
+async function readCustomCompletionStream(
+  response: Response,
+  signal: AbortSignal | undefined,
+  onTextDelta?: (delta: string) => boolean | void
+): Promise<{ text?: string; message?: string; canceled?: boolean }> {
+  if (!response.body) return { message: "AI 流式回复没有返回可读取的数据。" };
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  let failure: string | undefined;
+  const cancelReader = (): void => {
+    void reader.cancel(signal?.reason ?? "ai-completion-canceled").catch(() => undefined);
+  };
+  signal?.addEventListener("abort", cancelReader, { once: true });
+  if (signal?.aborted) cancelReader();
+
+  const consumeLine = (rawLine: string): boolean => {
+    const line = rawLine.trim();
+    if (!line.startsWith("data:")) return true;
+    const data = line.slice(5).trim();
+    if (!data || data === "[DONE]") return true;
+
+    const { delta, error } = readStreamChunkDelta(data);
+    if (error) {
+      failure = error;
+      return false;
+    }
+    if (!delta) return true;
+
+    text += delta;
+    if (text.length > maxCustomCompletionCharacters) {
+      failure = "AI 返回内容过长，已停止本次回复。";
+      return false;
+    }
+    if (onTextDelta?.(delta) === false) {
+      failure = "AI 返回内容超过监测协议限制，已停止本次分析。";
+      return false;
+    }
+    return true;
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!consumeLine(line)) break;
+      }
+      if (failure) {
+        await reader.cancel(failure).catch(() => undefined);
+        break;
+      }
+    }
+    if (!failure) {
+      buffer += decoder.decode();
+      if (buffer) consumeLine(buffer);
+    }
+  } catch {
+    await reader.cancel("AI 流式回复中断").catch(() => undefined);
+    return signal?.aborted
+      ? { canceled: true, message: "AI 回复已取消。" }
+      : { message: "AI 流式回复中断，请稍后再试。" };
+  } finally {
+    signal?.removeEventListener("abort", cancelReader);
+    reader.releaseLock?.();
+  }
+
+  if (signal?.aborted) return { canceled: true, message: "AI 回复已取消。" };
+  return failure ? { message: failure } : { text };
+}
+
+/**
+ * Runs a bounded, protocol-neutral completion for services that own their
+ * output contract (for example screen monitoring). It intentionally does not
+ * build the regular chat prompt, recall memory, apply mood, or capture a
+ * completed chat turn.
+ */
+export async function runAiCompletion(
+  request: AiCompletionRequest,
+  signal?: AbortSignal,
+  options: AiCompletionOptions = {}
+): Promise<AiCompletionResult> {
+  let config: Awaited<ReturnType<typeof getAiConnectionConfig>>;
+  try {
+    config = await getAiConnectionConfig(request.petId);
+  } catch (error: unknown) {
+    return { ok: false, message: getAiSettingsErrorMessage(error) };
+  }
+
+  if (!config?.baseUrl || !config.model || !config.apiKey) {
+    return { ok: false, message: "请先在 AI 设置中保存该桌宠的服务商、模型和 API Key。" };
+  }
+
+  const messages: AiChatMessage[] = [
+    { role: "system", content: request.systemPrompt.trim().slice(0, 64 * 1024) },
+    ...normalizeConversationMessages(request.messages).slice(-8)
+  ];
+  if (!messages.some((message) => message.role === "user")) {
+    return { ok: false, message: "AI 请求缺少用户输入。" };
+  }
+
+  const requestOnce = async (streaming: boolean): Promise<AiCompletionResult> => {
+    let response: Response;
+    try {
+      response = await fetch(buildChatCompletionsUrl(config!.baseUrl), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config!.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: streaming ? "text/event-stream, application/json" : "application/json"
+        },
+        signal,
+        body: JSON.stringify({
+          model: config!.model,
+          messages: messages.map((message) => buildAiProviderMessage(message)),
+          temperature: options.temperature ?? 0,
+          max_tokens: options.maxTokens ?? 1_200,
+          stream: streaming
+        })
+      });
+    } catch {
+      return signal?.aborted
+        ? { ok: false, message: "AI 回复已取消。", canceled: true, streaming }
+        : { ok: false, message: "无法连接 AI 服务，请检查网络或本地服务状态。", streaming };
+    }
+
+    if (signal?.aborted) {
+      await response.body?.cancel("ai-completion-canceled").catch(() => undefined);
+      return { ok: false, message: "AI 回复已取消。", canceled: true, streaming };
+    }
+
+    if (!response.ok) {
+      let message = `AI 请求失败，状态码 ${response.status}。`;
+      try {
+        const body = (await response.json()) as ChatCompletionResponse;
+        message = body.error?.message ?? message;
+      } catch {
+        // Keep the status-based message.
+      }
+      return { ok: false, message, streaming, status: response.status };
+    }
+
+    const contentType = response.headers?.get?.("Content-Type")?.toLowerCase() ?? "";
+    if (streaming && response.body && !contentType.includes("application/json")) {
+      const streamed = await readCustomCompletionStream(response, signal, options.onTextDelta);
+      if (streamed.canceled) return { ok: false, message: streamed.message ?? "AI 回复已取消。", canceled: true, streaming };
+      if (streamed.message) return { ok: false, message: streamed.message, streaming };
+      if (!streamed.text?.trim()) return { ok: false, message: "AI 没有返回可识别的监测结果。", streaming };
+      return { ok: true, message: "ok", text: streamed.text, streaming };
+    }
+
+    let body: ChatCompletionResponse;
+    try {
+      body = (await response.json()) as ChatCompletionResponse;
+    } catch {
+      return { ok: false, message: "AI 服务返回异常内容。", streaming };
+    }
+    const text = body.choices?.[0]?.message?.content;
+    if (typeof text !== "string" || !text.trim()) {
+      return { ok: false, message: "AI 没有返回可识别的监测结果。", streaming };
+    }
+    if (signal?.aborted) return { ok: false, message: "AI 回复已取消。", canceled: true, streaming };
+    if (text.length > maxCustomCompletionCharacters) {
+      return { ok: false, message: "AI 返回内容过长，已停止本次分析。", streaming };
+    }
+    if (options.onTextDelta?.(text) === false) {
+      return { ok: false, message: "AI 返回内容超过监测协议限制，已停止本次分析。", streaming };
+    }
+    return { ok: true, message: "ok", text, streaming };
+  };
+
+  const requestedStreaming = options.streaming === true;
+  const streamed = await requestOnce(requestedStreaming);
+  if (
+    !streamed.ok &&
+    requestedStreaming &&
+    !streamed.canceled &&
+    !signal?.aborted
+  ) {
+    // A provider that rejects only the streaming transport can still be used
+    // for the final, fully validated decision. Do not hide auth/rate-limit or
+    // server failures behind this compatibility fallback.
+    if (canFallbackAiOutputMode(streamed.status ?? -1)) return requestOnce(false);
+  }
+  return streamed;
 }
 
 function sendStreamEvent(target: WebContents, event: AiChatStreamEvent): void {
@@ -515,6 +927,12 @@ function emitEntryEvent(
 ): void {
   if (!entry.active) {
     return;
+  }
+
+  if (event.type === "chunk" || event.type === "done") {
+    markChatTiming(entry.requestId, "main", "reply-event-sent", event.ok ?? true);
+  } else if (event.type === "error" || event.type === "canceled") {
+    markChatTiming(entry.requestId, "main", "request-failed", false);
   }
 
   sendStreamEvent(entry.target, {
@@ -567,6 +985,9 @@ function completeEntry(
   entry: AiChatStreamEntry,
   event: Omit<AiChatStreamEvent, "streamId" | "requestId" | "petId">
 ): void {
+  if (event.type === "done" && event.ok) {
+    markChatTiming(entry.requestId, "main", "reply-result-ready");
+  }
   emitEntryEvent(entry, event);
   detachEntry(entry);
 }
@@ -728,6 +1149,7 @@ export async function startAiChatStream(
     completeEntry(entry, { ok: false, type: "error", message: "无法读取桌宠心情状态，请检查本地数据后重试。" });
     return;
   }
+
   let config: Awaited<ReturnType<typeof getAiConnectionConfig>>;
 
   try {
@@ -807,7 +1229,8 @@ export async function startAiChatStream(
       moodContext,
       memoryContext,
       streaming: preferred.streaming,
-      signal: entry.controller.signal
+      signal: entry.controller.signal,
+      onTiming: (stage, ok) => markChatTiming(request.requestId, "chat-model", stage, ok)
     });
     response = fetched.response;
     responseMode = fetched.mode;
@@ -861,6 +1284,7 @@ export async function startAiChatStream(
     try {
       body = (await response.json()) as ChatCompletionResponse;
     } catch {
+      markChatTiming(request.requestId, "chat-model", "model-output-completed", false);
       completeEntry(entry, {
         ok: false,
         type: "error",
@@ -870,6 +1294,10 @@ export async function startAiChatStream(
     }
 
     const content = body.choices?.[0]?.message?.content?.trim();
+    if (content) {
+      markChatTiming(request.requestId, "chat-model", "model-first-output");
+    }
+    markChatTiming(request.requestId, "chat-model", "model-output-completed", Boolean(content));
     let parsedReply = content ? parseFinalAiReply(content, responseContract) : undefined;
     if (!parsedReply?.reply) {
       completeEntry(entry, {
@@ -970,6 +1398,7 @@ export async function startAiChatStream(
     }
 
     if (safeSnapshot.changed) {
+      markChatTiming(request.requestId, "chat-model", "model-first-output");
       emitEntryEvent(entry, {
         ok: true,
         type: "chunk",
@@ -1012,11 +1441,13 @@ export async function startAiChatStream(
     if (buffer && !(await processSseLine(buffer))) {
       return;
     }
+    markChatTiming(request.requestId, "chat-model", "model-output-completed");
   } catch {
     if (!entry.active) {
       return;
     }
 
+    markChatTiming(request.requestId, "chat-model", "model-output-completed", false);
     completeEntry(entry, {
       ok: false,
       type: "error",

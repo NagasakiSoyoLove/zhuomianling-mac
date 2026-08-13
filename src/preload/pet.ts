@@ -29,6 +29,18 @@ import type {
 import type { MoodMutationResult, PetMoodDisplayState, PetMoodMeterPosition, PetMoodRangeEnteredEvent } from "../shared/types/mood";
 import type { SystemMoodEvent } from "../shared/mood";
 import type { PresetVoicePreviewRequest, PresetVoicePreviewResult } from "../shared/types/presetVoice";
+import type {
+  ScreenAwarenessAvailability,
+  ScreenCaptureSessionRequest,
+  ScreenCaptureSessionResult,
+  ScreenFrameRequest,
+  ScreenFrameResult,
+  ScreenMonitorReplyStatusRequest,
+  ScreenMonitorRuntimeState,
+  ScreenVisionReplyEvent,
+  ScreenVisionTimingRequest,
+  ScreenSourceSummary
+} from "../shared/types/screen";
 
 const petDesktopApi = {
   mood: {
@@ -73,6 +85,36 @@ const petDesktopApi = {
         ipcRenderer.off("ai-chat:stream-event", listener);
       };
     }
+  },
+  screenMonitor: {
+    getAvailability: () =>
+      ipcRenderer.invoke("screen-vision:pet-availability") as Promise<ScreenAwarenessAvailability>,
+    listSources: () =>
+      ipcRenderer.invoke("screen-vision:list-sources") as Promise<ScreenSourceSummary[]>,
+    start: (request: ScreenCaptureSessionRequest) =>
+      ipcRenderer.invoke("screen-vision:start", request) as Promise<ScreenCaptureSessionResult>,
+    frame: (request: ScreenFrameRequest) =>
+      ipcRenderer.invoke("screen-vision:frame", request) as Promise<ScreenFrameResult>,
+    onReplyEvent: (callback: (event: ScreenVisionReplyEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, result: ScreenVisionReplyEvent): void => {
+        callback(result);
+      };
+
+      ipcRenderer.on("screen-vision:reply-event", listener);
+      return () => {
+        ipcRenderer.off("screen-vision:reply-event", listener);
+      };
+    },
+    timing: (request: ScreenVisionTimingRequest) => {
+      ipcRenderer.send("screen-vision:timing", request);
+    },
+    reportReplyStatus: (request: ScreenMonitorReplyStatusRequest) => {
+      ipcRenderer.send("screen-vision:reply-status", request);
+    },
+    stop: (request: { petId: string; sessionId?: string }) =>
+      ipcRenderer.invoke("screen-vision:stop", request) as Promise<{ ok: boolean; message: string }>,
+    getState: () =>
+      ipcRenderer.invoke("screen-vision:get-state") as Promise<ScreenMonitorRuntimeState>
   },
   textToSpeech: {
     speak: (request: TextToSpeechRequest) =>

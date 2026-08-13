@@ -14,6 +14,7 @@ import {
   Smile,
   MessagesSquare,
   KeyRound,
+  Lock,
   Palette,
   Archive,
   Volume2,
@@ -67,6 +68,7 @@ import { VoiceInputPanel } from "./VoiceInputPanel";
 import { MoodPanel } from "./MoodPanel";
 import { PresetVoicePanel } from "./PresetVoicePanel";
 import { PetPackageExportDialog } from "../PetPackage/PetPackageExportDialog";
+import { VisionPanel } from "./VisionPanel";
 
 interface PetEditorProps {
   pets: PetDefinition[];
@@ -102,13 +104,17 @@ export function PetEditor({
   onBack
 }: PetEditorProps): JSX.Element | null {
   const MoodIcon = moodEditorTab.icon;
-  const [activePanel, setActivePanel] = useState<ActiveEditorPanel>(initialPanel);
+  const [activePanel, setActivePanel] = useState<ActiveEditorPanel>(
+    initialPanel === "vision" ? "aiConfig" : initialPanel
+  );
   const [aiExpanded, setAiExpanded] = useState(true);
   const [dialogueExpanded, setDialogueExpanded] = useState(true);
   const [interactionExpanded, setInteractionExpanded] = useState(true);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [pendingPanel, setPendingPanel] = useState<PendingNavigation | undefined>();
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [llmReady, setLlmReady] = useState(false);
+  const initialVisionPanelRef = useRef(initialPanel === "vision");
   const selectedPet = useMemo(() => {
     return pets.find((pet) => pet.id === selectedPetId) ?? pets[0];
   }, [pets, selectedPetId]);
@@ -128,7 +134,42 @@ export function PetEditor({
     setPendingPanel(undefined);
   }, [selectedPetId]);
 
+  useEffect(() => {
+    let disposed = false;
+    const refreshLlmState = async (): Promise<void> => {
+      try {
+        const summary = await window.desktopPet?.aiSettings.get(selectedPetId);
+        if (!disposed) {
+          setLlmReady(Boolean(summary?.hasApiKey && summary.baseUrl.trim() && summary.model.trim()));
+        }
+      } catch {
+        if (!disposed) setLlmReady(false);
+      }
+    };
+    void refreshLlmState();
+    const unsubscribe = window.desktopPet?.petConfig.onChanged(() => { void refreshLlmState(); });
+    return () => {
+      disposed = true;
+      unsubscribe?.();
+    };
+  }, [selectedPetId]);
+
+  useEffect(() => {
+    if (activePanel === "vision" && !llmReady) {
+      setActivePanel("aiConfig");
+      return;
+    }
+    if (llmReady && initialVisionPanelRef.current && activePanel === "aiConfig") {
+      initialVisionPanelRef.current = false;
+      setActivePanel("vision");
+    }
+  }, [activePanel, llmReady]);
+
   const changePanel = (nextPanel: ActiveEditorPanel): void => {
+    if (nextPanel === "vision" && !llmReady) {
+      setActivePanel("aiConfig");
+      return;
+    }
     if (nextPanel === activePanel) {
       return;
     }
@@ -297,16 +338,21 @@ export function PetEditor({
             <div className="editorSubTabs" aria-label="AI 设置子栏目">
               {aiSubTabs.map((tab) => {
                 const Icon = tab.icon;
+                const locked = tab.id === "vision" && !llmReady;
 
                 return (
                   <button
-                    className={activePanel === tab.id ? "editorSubTab active" : "editorSubTab"}
+                    className={[activePanel === tab.id ? "editorSubTab active" : "editorSubTab", locked ? "locked" : ""].filter(Boolean).join(" ")}
                     type="button"
                     key={tab.id}
+                    disabled={locked}
+                    aria-disabled={locked}
+                    title={locked ? "请先保存并应用有效的 LLM 配置" : undefined}
                     onClick={() => changePanel(tab.id)}
                   >
                     <Icon size={16} />
                     <span>{tab.label}</span>
+                    {locked ? <Lock size={12} aria-hidden="true" /> : null}
                   </button>
                 );
               })}
@@ -376,6 +422,9 @@ export function PetEditor({
             <PersonaPanel pet={selectedPet} onSavedPet={onSavedPet} onDirtyChange={setHasUnsavedChanges} />
           ) : null}
           {activePanel === "aiConfig" ? <AiPanel pet={selectedPet} onDirtyChange={setHasUnsavedChanges} /> : null}
+          {activePanel === "vision" ? (
+            <VisionPanel pet={selectedPet} onSavedPet={onSavedPet} onDirtyChange={setHasUnsavedChanges} />
+          ) : null}
           {activePanel === "voiceInput" ? (
             <VoiceInputPanel pet={selectedPet} onSavedPet={onSavedPet} onDirtyChange={setHasUnsavedChanges} />
           ) : null}

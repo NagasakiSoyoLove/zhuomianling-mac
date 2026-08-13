@@ -216,6 +216,10 @@ describe("pet window operation generations", () => {
       height: 720
     });
     expect(electronMock.instances[0]?.constructorOptions.resizable).toBe(false);
+    expect(
+      (electronMock.instances[0]?.constructorOptions.webPreferences as { backgroundThrottling?: boolean })
+        .backgroundThrottling
+    ).toBe(false);
     await closePetWindow({ playEffect: false });
   });
 

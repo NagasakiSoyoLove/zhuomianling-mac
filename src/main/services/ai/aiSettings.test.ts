@@ -359,6 +359,102 @@ describe("AI API key storage", () => {
     expect(metadataContent).not.toContain("private-key");
   });
 
+  it("reuses successful model and output checks when saving the same key", async () => {
+    fetchMock
+      .mockResolvedValueOnce(createModelsResponse())
+      .mockResolvedValueOnce(createProbeResponse());
+    const { listAiModels, saveAiConnection, testAiOutputCapability } = await import("./aiSettings");
+    const draft = {
+      petId: "pet-a",
+      providerName: "Provider A",
+      baseUrl: "https://api.example.com/v1/",
+      model: "model-a",
+      apiKey: "private-key"
+    };
+
+    await expect(listAiModels(draft)).resolves.toMatchObject({ ok: true });
+    await expect(testAiOutputCapability(draft)).resolves.toMatchObject({
+      ok: true,
+      capability: { confidence: "tested" }
+    });
+
+    const saved = await saveAiConnection(draft);
+
+    expect(saved.test).toMatchObject({ ok: true });
+    expect(saved.test.message).toContain("已复用已完成的输出能力测试");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retests output capability when the API key changes", async () => {
+    fetchMock
+      .mockResolvedValueOnce(createModelsResponse())
+      .mockResolvedValueOnce(createProbeResponse());
+    const { listAiModels, saveAiConnection, testAiOutputCapability } = await import("./aiSettings");
+    const firstDraft = {
+      petId: "pet-a",
+      providerName: "Provider A",
+      baseUrl: "https://api.example.com/v1",
+      model: "model-a",
+      apiKey: "private-key"
+    };
+
+    await listAiModels(firstDraft);
+    await testAiOutputCapability(firstDraft);
+    await saveAiConnection(firstDraft);
+
+    fetchMock
+      .mockResolvedValueOnce(createModelsResponse())
+      .mockResolvedValueOnce(createProbeResponse());
+    await saveAiConnection({ ...firstDraft, apiKey: "new-private-key" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("reuses persisted tested capability when the saved key is unchanged", async () => {
+    await fs.writeFile(
+      path.join(temporaryDirectory, "ai-connections.json"),
+      JSON.stringify({
+        version: 3,
+        connections: {
+          "pet-a": {
+            petId: "pet-a",
+            providerName: "Provider A",
+            baseUrl: "https://api.example.com/v1",
+            model: "model-a",
+            models: [{ id: "model-a", name: "model-a" }],
+            outputCapability: {
+              baseUrl: "https://api.example.com/v1",
+              model: "model-a",
+              mode: "json-schema",
+              protocolTier: "full",
+              streaming: true,
+              confidence: "tested",
+              checkedAt: "2026-07-15T00:00:00.000Z",
+              probeVersion: 2
+            },
+            updatedAt: "2026-07-15T00:00:00.000Z"
+          }
+        }
+      }),
+      "utf8"
+    );
+    const { setSecureString } = await import("../config/secureConfigStore");
+    await setSecureString("ai-api-key", "pet-a", "private-key", "https://api.example.com/v1");
+
+    const { saveAiConnection } = await import("./aiSettings");
+    const saved = await saveAiConnection({
+      petId: "pet-a",
+      providerName: "Provider A",
+      baseUrl: "https://api.example.com/v1",
+      model: "model-a",
+      apiKey: ""
+    });
+
+    expect(saved.test.ok).toBe(true);
+    expect(saved.config.outputCapability).toMatchObject({ confidence: "tested" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("discards a stored capability when its endpoint or model tuple is stale", async () => {
     await fs.writeFile(
       path.join(temporaryDirectory, "ai-connections.json"),

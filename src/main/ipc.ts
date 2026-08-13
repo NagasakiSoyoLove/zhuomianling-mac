@@ -1,5 +1,6 @@
 import type { IpcMain, IpcMainEvent, IpcMainInvokeEvent, OpenDialogOptions } from "electron";
-import { app, BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog, shell } from "electron";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type {
   AiChatStreamCancelRequest,
@@ -45,6 +46,11 @@ import type {
   MemoryUpdateRequest
 } from "../shared/types/memory";
 import type { StartupRendererStage } from "../shared/types/startup";
+import {
+  TIMED_DIAGNOSTICS_TEST_MODULE,
+  type TimedDiagnosticEvent,
+  type TimedDiagnosticSnapshot
+} from "../shared/types/timedDiagnostics";
 import type { PetPackageImportAiModelsRequest, PetPackageImportAiRequest, PetPackageImportCancelRequest, PetPackageImportCommitRequest, PetPackageImportVoiceRequest } from "../shared/types/petPackage";
 import { sanitizePetPackageFileName } from "../shared/validation/petPackage";
 import type { LocalPetMoodSettingsDraft, PetMoodEnterPreviewRequest, PetMoodMeterPosition, PetMoodVoiceImportRequest, PetMoodVoiceRemoveRequest } from "../shared/types/mood";
@@ -55,6 +61,13 @@ import type {
   PresetVoicePreviewRequest,
   PresetVoiceTaskCancelRequest
 } from "../shared/types/presetVoice";
+import type {
+  ScreenCaptureSessionRequest,
+  ScreenFrameRequest,
+  ScreenMonitorReplyStatusRequest,
+  ScreenVisionConnectionDraft,
+  ScreenVisionTimingRequest
+} from "../shared/types/screen";
 import { cancelAiChatStreams, startAiChatStream } from "./services/ai/aiChat";
 import {
   getAiConnectionSummary,
@@ -138,6 +151,56 @@ import { presetVoiceGenerationService } from "./services/presetVoice/PresetVoice
 import { exportPetPackage, inspectPetPackageExport } from "./services/petPackage/petPackageExportService";
 import { beginPetPackageImport, cancelPetPackageImport, commitPetPackageImport, listPetPackageImportAiModels, testPetPackageImportAi, testPetPackageImportVoice } from "./services/petPackage/petPackageImportService";
 import { cancelPetPackageOperation, onPetPackageProgress } from "./services/petPackage/petPackageOperation";
+import { screenVisionService } from "./services/screen/ScreenVisionService";
+import { screenCaptureService } from "./services/screen/ScreenCaptureService";
+import { screenVisionTiming } from "./services/screen/ScreenVisionTiming";
+import { startLocalHelpServer } from "./services/help/localHelpServer";
+
+const localHelpPageFileName = "help.html";
+
+function getLocalHelpPageRoot(): string {
+  if (app.isPackaged) {
+    return path.join(
+      process.resourcesPath,
+      "app.asar.unpacked",
+      "dist",
+      "renderer"
+    );
+  }
+
+  return path.join(__dirname, "../renderer");
+}
+
+async function openLocalHelpPage(): Promise<{ ok: true } | { ok: false; message: string }> {
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL?.replace(/\/$/, "");
+
+  if (devServerUrl) {
+    try {
+      await shell.openExternal(`${devServerUrl}/${localHelpPageFileName}`);
+      return { ok: true };
+    } catch {
+      return { ok: false, message: "本地教程网页打开失败。" };
+    }
+  }
+
+  const localHelpPageRoot = getLocalHelpPageRoot();
+  const localHelpPagePath = path.join(localHelpPageRoot, localHelpPageFileName);
+
+  if (!existsSync(localHelpPagePath)) {
+    return {
+      ok: false,
+      message: "本地教程网页尚未接入。"
+    };
+  }
+
+  try {
+    const localHelpServerUrl = await startLocalHelpServer(localHelpPageRoot);
+    await shell.openExternal(`${localHelpServerUrl}/${localHelpPageFileName}`);
+    return { ok: true };
+  } catch {
+    return { ok: false, message: "本地教程网页打开失败。" };
+  }
+}
 
 export function registerIpc(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | null): void {
   let moodRangeEventId = 0;
@@ -167,6 +230,17 @@ export function registerIpc(ipcMain: IpcMain, getMainWindow: () => BrowserWindow
       getBoundPetWindowPayload(event.sender)?.id
     );
   };
+
+  // TIMED DIAGNOSTICS TEST MODULE: forward bounded timing events to the main
+  // window. The renderer can only expose the page when the explicit timed
+  // development launcher has enabled the matching Vite flag.
+  const forwardTimedDiagnosticEvent = (event: TimedDiagnosticEvent): void => {
+    const mainWindow = getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send("timed-diagnostics-test:event", event);
+  };
+  startupProfiler.subscribe(forwardTimedDiagnosticEvent);
+  screenVisionTiming.subscribe(forwardTimedDiagnosticEvent);
 
   const handle = <Args extends unknown[], Result>(
     channel: string,
@@ -242,6 +316,17 @@ export function registerIpc(ipcMain: IpcMain, getMainWindow: () => BrowserWindow
   });
 
   handle("app:get-version", "main", () => app.getVersion());
+
+  handle("app:open-local-help", "main", openLocalHelpPage);
+
+  handle("timed-diagnostics-test:get-snapshot", "main", (): TimedDiagnosticSnapshot => ({
+    module: TIMED_DIAGNOSTICS_TEST_MODULE,
+    enabled: startupProfiler.enabled || screenVisionTiming.enabled,
+    events: [
+      ...startupProfiler.getEvents(),
+      ...screenVisionTiming.getEvents()
+    ]
+  }));
 
   handle("app-window:is-shown", "main", () => getMainWindow()?.isVisible() ?? false);
 
@@ -551,9 +636,15 @@ export function registerIpc(ipcMain: IpcMain, getMainWindow: () => BrowserWindow
     }
 
     await presetVoiceGenerationService.disposePet(petId);
+    await screenCaptureService.stopForPet(petId);
     const result = await memoryManagementService.runPetDeletion(
       petId,
-      () => deleteLocalPet(petId, { finalizeDeletion: deleteAiConnection })
+      () => deleteLocalPet(petId, {
+        finalizeDeletion: async (deletingPetId) => {
+          await deleteAiConnection(deletingPetId);
+          await screenVisionService.deleteForPet(deletingPetId);
+        }
+      })
     );
 
     if (result.ok) {
@@ -660,9 +751,104 @@ export function registerIpc(ipcMain: IpcMain, getMainWindow: () => BrowserWindow
     testAiOutputCapability(draft)
   );
 
-  handle("ai-settings:save", "main", (_event, draft: AiConnectionDraft) =>
-    saveAiConnection(draft)
+  handle("ai-settings:save", "main", async (_event, draft: AiConnectionDraft) => {
+    const result = await saveAiConnection(draft);
+    if (result.test.ok) {
+      await screenVisionService.invalidateAwarenessAfterAiConfigChange(draft.petId);
+      emitPetConfigChanged(await getLocalPetDefinition(draft.petId));
+    }
+    return result;
+  });
+
+  handle("screen-vision:get-availability", "main", (_event, petId: string) =>
+    screenVisionService.getAvailability(petId)
   );
+
+  handle("screen-vision:test-current", "main", (_event, petId: string) =>
+    screenVisionService.testCurrentChatVision(petId)
+  );
+
+  handle("screen-vision:list-models", "main", (_event, draft: ScreenVisionConnectionDraft) =>
+    screenVisionService.listIndependentVisionModels(draft)
+  );
+
+  handle("screen-vision:test-independent", "main", (_event, draft: ScreenVisionConnectionDraft) =>
+    screenVisionService.testIndependentVision(draft)
+  );
+
+  handle("screen-vision:save-independent", "main", (_event, draft: ScreenVisionConnectionDraft) =>
+    screenVisionService.saveIndependentVision(draft).then(async (summary) => {
+      emitPetConfigChanged(await getLocalPetDefinition(draft.petId));
+      return summary;
+    })
+  );
+
+  handle("screen-vision:save-settings", "main", async (_event, draft: { petId: string; enabled: boolean; mode?: "quiet" | "companion"; persistentCaptureEnabled?: boolean }) => {
+    const result = await screenVisionService.saveAwarenessSettings(draft);
+    if (result.ok) emitPetConfigChanged(result.pet);
+    if (!draft.enabled) await screenCaptureService.stopForPet(draft.petId);
+    else if (draft.persistentCaptureEnabled === false) await screenCaptureService.stopPersistentForPet(draft.petId);
+    return result;
+  });
+
+  handle("screen-vision:pet-availability", "pet", async (event) => {
+    const petId = getBoundPetWindowPayload(event.sender)?.id;
+    if (!petId) throw new Error("视觉请求未绑定桌宠。");
+    return screenVisionService.getAvailability(petId);
+  });
+
+  handle("screen-vision:list-sources", "pet", async (event) => {
+    const petId = getBoundPetWindowPayload(event.sender)?.id;
+    if (!petId) throw new Error("视觉请求未绑定桌宠。");
+    const availability = await screenVisionService.getAvailability(petId);
+    if (!availability.canUseVision) return [];
+    return screenCaptureService.listSources(event.sender);
+  });
+
+  handle("screen-vision:start", "pet", async (event, request: ScreenCaptureSessionRequest) => {
+    assertPetIdBound("screen-vision:start", event, request.petId);
+    const availability = await screenVisionService.getAvailability(request.petId);
+    return screenCaptureService.startSession(event.sender, request, availability.canUseVision);
+  });
+
+  handle("screen-vision:frame", "pet", (event, request: ScreenFrameRequest) => {
+    assertPetIdBound("screen-vision:frame", event, request.petId);
+    return screenCaptureService.processFrame(event.sender, request);
+  });
+
+  on("screen-vision:timing", "pet", (event, request: ScreenVisionTimingRequest) => {
+    assertPetIdBound("screen-vision:timing", event, request.petId);
+    screenVisionTiming.mark(
+      request.requestId,
+      request.phase,
+      request.stage,
+      request.ok ?? true,
+      request.kind ?? "vision"
+    );
+  });
+
+  handle("screen-vision:stop", "pet", async (event, request: { petId: string; sessionId?: string }) => {
+    assertPetIdBound("screen-vision:stop", event, request.petId);
+    return {
+      ok: await screenCaptureService.stop(event.sender, request.sessionId),
+      message: "视觉观察已停止。"
+    };
+  });
+
+  on("screen-vision:reply-status", "pet", (event, request: ScreenMonitorReplyStatusRequest) => {
+    assertPetIdBound("screen-vision:reply-status", event, request.petId);
+    screenCaptureService.reportReplyDelivery(event.sender, request);
+  });
+
+  handle("screen-vision:get-state", "pet", (event) => {
+    const state = screenCaptureService.getState(event.sender);
+    return state ?? {
+      sessionId: "",
+      purpose: "manual-monitor" as const,
+      mode: "quiet" as const,
+      state: "inactive" as const
+    };
+  });
 
   handle("memory:get-summary", "main", (_event, petId: string) =>
     memoryManagementService.getSummary(petId)
@@ -878,15 +1064,26 @@ export function registerIpc(ipcMain: IpcMain, getMainWindow: () => BrowserWindow
     })
   );
 
-  handle("pet-window:close", "both", (_event, options?: PetWindowCloseOptions) =>
-    closePetWindow(options)
-  );
+  handle("pet-window:close", "both", async (event, options?: PetWindowCloseOptions) => {
+    if (isPetWindowWebContents(event.sender)) {
+      await screenCaptureService.stopForOwner(event.sender);
+    } else {
+      const currentPetId = getCurrentPetWindowPayload()?.id;
+      if (currentPetId) await screenCaptureService.stopForPet(currentPetId);
+    }
+    return closePetWindow(options);
+  });
 
-  handle("pet-window:toggle-click-through", "pet", () => togglePetWindowClickThrough());
+  handle("pet-window:toggle-click-through", "pet", async (event) => {
+    const nextState = await togglePetWindowClickThrough();
+    if (nextState.clickThrough) screenCaptureService.stopDirectQuestionForOwner(event.sender);
+    return nextState;
+  });
 
-  handle("pet-window:set-click-through", "pet", (_event, value: boolean) =>
-    setPetWindowClickThrough(value)
-  );
+  handle("pet-window:set-click-through", "pet", (event, value: boolean) => {
+    if (value) screenCaptureService.stopDirectQuestionForOwner(event.sender);
+    return setPetWindowClickThrough(value);
+  });
 
   handle("pet-window:set-click-through-control-interactive", "pet", (_event, value: boolean) =>
     setPetWindowClickThroughControlInteractive(value)

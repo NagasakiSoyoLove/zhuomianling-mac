@@ -25,7 +25,7 @@ const pet: PetDefinition = {
   },
   capabilities: { chat: true, voiceOutput: false, subtitles: true },
   details: { role: "role", personality: "kind", scenes: [], features: [] },
-  uiSettings: { theme: "soft", customTheme: {} as never, desktopPosition: { x: 1, y: 2 } },
+  uiSettings: { theme: "soft", desktopPosition: { x: 1, y: 2 } },
   isLocal: true
 };
 
@@ -77,6 +77,33 @@ describe("pet package protocol", () => {
     const base = createPortablePetDefinition(pet, "live2d/model.model3.json");
     expect(() => parsePortablePetDefinition({ ...base, apiKey: "secret" })).toThrow(/禁止字段|未知字段/);
     expect(() => parsePortablePetDefinition({ ...base, description: "C:\\private\\file" })).toThrow(/绝对路径/);
+  });
+
+  it("preserves an imported theme even when a built-in theme is active", () => {
+    const retainedTheme = {
+      id: "mint-plaid",
+      name: "薄荷格纹",
+      description: "retained",
+      version: 1,
+      tokens: {
+        background: "#f3fbf8",
+        surface: "#ffffff",
+        text: "#273047",
+        mutedText: "#6d7f89",
+        accent: "#0f7281",
+        border: "#668987"
+      }
+    } as const;
+    const portable = createPortablePetDefinition({
+      ...pet,
+      uiSettings: { theme: "soft", customTheme: retainedTheme }
+    }, "live2d/model.model3.json");
+
+    expect(portable.uiSettings).toMatchObject({ theme: "soft", customTheme: retainedTheme });
+    expect(parsePortablePetDefinition(portable).uiSettings).toMatchObject({
+      theme: "soft",
+      customTheme: retainedTheme
+    });
   });
 
   it("allocates collision-safe canonical ids and safe file names", () => {

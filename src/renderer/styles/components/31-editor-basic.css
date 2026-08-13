@@ -647,3 +647,414 @@
   font-size: 12px;
   font-weight: 900;
 }
+
+.visionPanel {
+  gap: 18px;
+}
+
+.visionPanel .panelHeading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: flex-start;
+  gap: 14px 18px;
+}
+
+.visionPanel .panelHeading > div {
+  min-width: 0;
+}
+
+.visionPanel .panelHeading > .visionEnabledBadge,
+.visionPanel .panelHeading > .visionDisabledBadge {
+  justify-self: end;
+  margin-top: 2px;
+}
+
+.visionPanel .panelEyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #2684ff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.visionPanel .panelHeading h2 {
+  margin: 6px 0 4px;
+}
+
+.visionPanel .panelHeading p {
+  margin: 0;
+  color: #708092;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.visionEnabledBadge,
+.visionDisabledBadge {
+  border: 1px solid rgba(38, 132, 255, 0.22);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: #1766c2;
+  background: rgba(238, 246, 255, 0.82);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.visionDisabledBadge {
+  color: #718096;
+  border-color: rgba(113, 128, 150, 0.2);
+  background: rgba(241, 245, 249, 0.82);
+}
+
+.visionLockedState {
+  display: grid;
+  min-height: 300px;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  color: #8290a0;
+  text-align: center;
+}
+
+.visionLockedState svg {
+  color: #a6b2bf;
+}
+
+.visionLockedState h2,
+.visionLockedState p {
+  margin: 0;
+}
+
+.visionLockedState h2 {
+  color: #4b5a6a;
+  font-size: 18px;
+}
+
+.visionLockedState p {
+  max-width: 360px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.visionLoading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #708092;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.visionSteps {
+  display: grid;
+  gap: 13px;
+}
+
+.visionStepCard {
+  display: grid;
+  gap: 14px;
+  border: 1px solid rgba(38, 132, 255, 0.12);
+  border-radius: 16px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.64);
+  box-shadow: 0 9px 24px rgba(47, 81, 113, 0.06);
+}
+
+.visionStepHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.visionStepHeader > span {
+  margin-top: 1px;
+}
+
+.visionStepHeaderCopy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.visionStepHeaderCopy p {
+  margin: 0;
+  color: #708092;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.visionStepHeader span {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 8px;
+  color: #fff;
+  background: #2684ff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.visionStepHeader h3 {
+  margin: 0;
+  color: #25364a;
+  font-size: 14px;
+}
+
+.visionConnectionSummary,
+.visionCapabilityResult {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-radius: 12px;
+  padding: 11px 12px;
+  background: rgba(241, 247, 255, 0.8);
+}
+
+.visionConnectionSummary {
+  justify-content: space-between;
+}
+
+.visionConnectionSummary div,
+.visionCapabilityResult div {
+  display: grid;
+  gap: 3px;
+}
+
+.visionConnectionSummary span,
+.visionConnectionSummary small,
+.visionCapabilityResult p {
+  color: #708092;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.visionConnectionSummary strong,
+.visionCapabilityResult strong {
+  color: #25364a;
+  font-size: 13px;
+}
+
+.visionFormGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 11px;
+}
+
+.visionFormGrid label {
+  display: grid;
+  gap: 6px;
+  color: #607080;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.visionFormGrid input {
+  min-height: 36px;
+  border: 1px solid rgba(38, 132, 255, 0.17);
+  border-radius: 9px;
+  padding: 0 10px;
+  color: #25364a;
+  background: rgba(255, 255, 255, 0.86);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.visionFormGrid input:focus {
+  border-color: rgba(38, 132, 255, 0.56);
+  box-shadow: 0 0 0 3px rgba(38, 132, 255, 0.12);
+}
+
+.visionConnectionActions {
+  align-self: end;
+}
+
+.visionCapabilityLine,
+.visionIndependentSaveRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.visionCapabilityLine > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #718096;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.visionCapabilityLine > span.ok {
+  color: #1d8a63;
+}
+
+.visionCapabilityLine > span.warning {
+  color: #a96512;
+}
+
+.visionRouteNotice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #1766c2;
+  background: rgba(238, 246, 255, 0.78);
+}
+
+.visionRouteNotice > svg {
+  margin-top: 1px;
+}
+
+.visionRouteNotice > div {
+  display: grid;
+  gap: 3px;
+}
+
+.visionRouteNotice strong {
+  font-size: 13px;
+}
+
+.visionRouteNotice span {
+  color: #607080;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.visionRouteNotice.success {
+  color: #1d8a63;
+  background: rgba(231, 247, 237, 0.82);
+}
+
+.visionRouteNotice.warning {
+  color: #a96512;
+  background: rgba(255, 247, 223, 0.84);
+}
+
+.visionStepHint {
+  margin: -2px 0 0;
+  color: #708092;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.visionCapabilityLine .secondaryAction,
+.visionIndependentSaveRow .secondaryAction {
+  min-height: 31px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.visionCapabilityResult .resultIcon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 11px;
+  color: #7b8794;
+  background: rgba(148, 163, 184, 0.13);
+}
+
+.visionCapabilityResult .resultIcon.ok {
+  color: #1d8a63;
+  background: rgba(52, 211, 153, 0.14);
+}
+
+.visionCapabilityResult p {
+  margin: 0;
+}
+
+.visionPersistentCaptureOption {
+  display: grid;
+  gap: 11px;
+  border: 1px solid rgba(38, 132, 255, 0.14);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(248, 251, 255, 0.78);
+}
+
+.visionPersistentCaptureLabel {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.visionPersistentCaptureLabel > input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+  accent-color: #2684ff;
+}
+
+.visionPersistentCaptureCopy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.visionPersistentCaptureCopy strong {
+  color: #25364a;
+  font-size: 13px;
+}
+
+.visionPersistentCaptureCopy span {
+  color: #708092;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.visionMessage {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #b34b62;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.visionMessage.ok {
+  color: #1d8a63;
+}
+
+.visionEnabledHint {
+  margin: -5px 0 0;
+  color: #708092;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+@media (max-width: 720px) {
+  .visionPanel .panelHeading {
+    grid-template-columns: 1fr;
+  }
+
+  .visionPanel .panelHeading > .visionEnabledBadge,
+  .visionPanel .panelHeading > .visionDisabledBadge {
+    justify-self: start;
+    margin-top: 0;
+  }
+
+  .visionFormGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .visionCapabilityLine,
+  .visionIndependentSaveRow,
+  .visionConnectionSummary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

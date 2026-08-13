@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+// TIMED DIAGNOSTICS TEST MODULE: startup timing collector tests.
+import { describe, expect, it, vi } from "vitest";
 import { StartupProfiler } from "./startupProfiler";
+import { TIMED_DIAGNOSTICS_TEST_MODULE } from "../shared/types/timedDiagnostics";
 
 describe("StartupProfiler", () => {
   it("prints one bounded line for each unique startup stage", async () => {
@@ -46,5 +48,28 @@ describe("StartupProfiler", () => {
     expect(lines).toEqual([
       "[启动计时] 累计     12.0 ms | 本步     12.0 ms | 失败：配置迁移"
     ]);
+  });
+
+  it("publishes bounded events for the TIMED DIAGNOSTICS TEST MODULE without requiring logs", () => {
+    let clock = 10;
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const profiler = new StartupProfiler(true, () => clock);
+    const events: Array<{ module: string; stage: string; totalMs: number }> = [];
+    const unsubscribe = profiler.subscribe((event) => {
+      events.push({ module: event.module, stage: event.stage, totalMs: event.totalMs });
+    });
+
+    clock = 35;
+    profiler.markOnce("main-window", "创建主窗口");
+    unsubscribe();
+
+    expect(events).toEqual([{
+      module: TIMED_DIAGNOSTICS_TEST_MODULE,
+      stage: "main-window",
+      totalMs: 25
+    }]);
+    expect(profiler.getEvents()).toHaveLength(1);
+    expect(consoleLog).not.toHaveBeenCalled();
+    consoleLog.mockRestore();
   });
 });

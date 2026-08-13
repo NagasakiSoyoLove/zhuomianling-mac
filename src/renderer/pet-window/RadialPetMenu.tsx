@@ -1,4 +1,4 @@
-import { Gauge, Hand, Lock, MessageCircle, Unlock, X } from "lucide-react";
+import { Eye, Gauge, Hand, Lock, MessageCircle, Unlock, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { CSSProperties, RefObject } from "react";
 import type { PetUiTheme } from "../../shared/types/pet";
@@ -13,6 +13,7 @@ interface RadialPetMenuProps {
   variant?: PetUiTheme;
   touchEnabled: boolean;
   chatOpen: boolean;
+  clickThroughControlVisible: boolean;
   clickThroughButtonRef: RefObject<HTMLButtonElement>;
   onCloseMenu: () => void;
   onToggleClickThrough: () => void;
@@ -21,6 +22,9 @@ interface RadialPetMenuProps {
   onToggleChat: () => void;
   moodOpen: boolean;
   onToggleMood: () => void;
+  visionAvailable: boolean;
+  visionActive: boolean;
+  onToggleVision: () => void;
 }
 
 interface RadialMenuAction {
@@ -28,7 +32,7 @@ interface RadialMenuAction {
   label: string;
   title: string;
   Icon: LucideIcon;
-  tone: "passThrough" | "danger" | "touch" | "chat" | "mood";
+  tone: "passThrough" | "danger" | "touch" | "chat" | "mood" | "vision";
   active?: boolean;
   buttonRef?: RefObject<HTMLButtonElement>;
   onClick: () => void;
@@ -51,6 +55,7 @@ export function RadialPetMenu({
   variant = "soft",
   touchEnabled,
   chatOpen,
+  clickThroughControlVisible,
   clickThroughButtonRef,
   onCloseMenu,
   onToggleClickThrough,
@@ -58,8 +63,12 @@ export function RadialPetMenu({
   onToggleTouch,
   onToggleChat,
   moodOpen,
-  onToggleMood
+  onToggleMood,
+  visionAvailable,
+  visionActive,
+  onToggleVision
 }: RadialPetMenuProps): JSX.Element {
+  const clickThroughControlHidden = state.clickThrough && !clickThroughControlVisible;
   const clickThroughAction: RadialMenuAction = {
     id: "clickThrough",
     label: state.clickThrough ? "解锁" : "穿透",
@@ -106,6 +115,18 @@ export function RadialPetMenu({
           active: moodOpen,
           onClick: onToggleMood
         },
+        ...(visionAvailable ? [{
+          id: "vision",
+          label: "视觉",
+          title: visionActive ? "停止视觉监测" : "打开屏幕观察",
+          Icon: Eye,
+          tone: "vision" as const,
+          active: visionActive,
+          onClick: () => {
+            onToggleVision();
+            onCloseMenu();
+          }
+        }] : []),
         {
           id: "chat",
           label: "对话",
@@ -122,7 +143,12 @@ export function RadialPetMenu({
 
   return (
     <div
-      className="petRadialMenuLayer"
+      className={[
+        "petRadialMenuLayer",
+        clickThroughControlHidden ? "clickThroughControlHidden" : ""
+      ]
+        .filter(Boolean)
+        .join(" ")}
       onContextMenu={(event) => event.preventDefault()}
       onPointerDown={() => {
         if (!state.clickThrough) {
@@ -159,7 +185,12 @@ export function RadialPetMenu({
           return (
             <button
               ref={action.buttonRef}
-              className={["petRadialButton", action.tone, action.active ? "active" : ""]
+              className={[
+                "petRadialButton",
+                action.tone,
+                action.active ? "active" : "",
+                clickThroughControlHidden ? "clickThroughControlHidden" : ""
+              ]
                 .filter(Boolean)
                 .join(" ")}
               style={getRadialButtonStyle(index, actions.length)}

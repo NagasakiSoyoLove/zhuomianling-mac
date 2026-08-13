@@ -12,12 +12,29 @@ describe("App initial module boundary", () => {
     expect(source).toContain('import("../components/PetEditor/PetEditor")');
     expect(source).toContain('import("../components/PetStage/PetStage")');
     expect(source).toContain('import("../components/MemoryBook/MemoryBook")');
+    expect(source).toContain('import("../components/HelpCenter/HelpCenter")');
+    expect(source).toContain('await import("../styles/surfaces/85-help-center.css")');
+    expect(source).not.toMatch(/^import\s+\{\s*HelpCenter\s*\}\s+from/m);
     expect(source).toContain("<DeferredViewBoundary");
     expect(source).toContain('title="桌宠详情加载失败"');
     expect(source).toContain('title="桌宠编辑器加载失败"');
     expect(source).toContain('title="记忆书加载失败"');
     expect(source).toContain("正在加载，请稍候…");
     expect(source).not.toContain("按需载入");
+  });
+
+  // TIMED DIAGNOSTICS TEST MODULE: timed-launcher visibility and lazy-boundary coverage.
+  it("exposes the TIMED DIAGNOSTICS TEST MODULE only through the timed launcher flag", async () => {
+    const source = await fs.readFile(new URL("./App.tsx", import.meta.url), "utf8");
+    const testGate = await fs.readFile(
+      new URL("../components/TimedDiagnosticsTest/timedDiagnosticsTest.ts", import.meta.url),
+      "utf8"
+    );
+
+    expect(source).toContain("TIMED_DIAGNOSTICS_TEST_ENABLED");
+    expect(source).toContain('import("../components/TimedDiagnosticsTest/TimedDiagnosticsTestPage")');
+    expect(testGate).toContain('import.meta.env.VITE_SCREEN_MONITOR_DEBUG === "1"');
+    expect(testGate).toContain("TIMED_DIAGNOSTICS_TEST_MAX_REQUESTS = 10");
   });
 
   it("starts a fresh memory-book session whenever it is opened from the home view", async () => {

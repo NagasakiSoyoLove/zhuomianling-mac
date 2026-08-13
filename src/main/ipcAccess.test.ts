@@ -80,13 +80,18 @@ describe("assertIpcSenderAllowed", () => {
     ]) {
       expect(accessByChannel.get(channel)).toBe("main");
     }
+    // TIMED DIAGNOSTICS TEST MODULE: screen capture IPC sender binding coverage.
     for (const channel of [
       "ai-chat:stream",
       "ai-chat:cancel",
       "text-to-speech:speak",
       "speech-stream:start",
-      "pet-window:start-drag"
-      ,"preset-voice:load-runtime"
+      "pet-window:start-drag",
+      // TIMED DIAGNOSTICS TEST MODULE: screen capture IPC access coverage.
+      "screen-vision:start",
+      "screen-vision:frame",
+      "screen-vision:stop",
+      "preset-voice:load-runtime"
     ]) {
       expect(accessByChannel.get(channel)).toBe("pet");
     }
@@ -99,8 +104,12 @@ describe("assertIpcSenderAllowed", () => {
       "speech-to-text:transcribe",
       "text-to-speech:speak",
       "text-to-speech:stop",
-      "speech-stream:start"
-      ,"preset-voice:load-runtime"
+      "speech-stream:start",
+      // TIMED DIAGNOSTICS TEST MODULE: screen capture IPC sender binding coverage.
+      "screen-vision:start",
+      "screen-vision:frame",
+      "screen-vision:stop",
+      "preset-voice:load-runtime"
     ]) {
       expect(ipcSource).toContain(`assertPetIdBound("${channel}", event, request.petId)`);
     }

@@ -9,6 +9,7 @@ import type {
   LocalPetAvatarImportResult,
   LocalPetBasicInfoDraft,
   LocalPetDeleteResult,
+  LocalPetScreenAwarenessDraft,
   LocalPetAvatarCropSaveRequest,
   LocalPetEventSettingsDraft,
   PetMoodSettings,
@@ -846,6 +847,11 @@ function buildPetDefinition(draft: LocalPetBasicInfoDraft, petId: string): PetDe
       clickThroughOpacity: 0.45,
       desktopScale: 1
     },
+    screenAwarenessSettings: {
+      enabled: false,
+      mode: "quiet",
+      persistentCaptureEnabled: false
+    },
     isLocal: true,
     subtitleStyle: {
       tone: "soft",
@@ -1258,7 +1264,8 @@ const defaultCustomThemeRadialMenu: PetCustomThemeRadialMenu = {
     touch: { surface: "#fff9e8", text: "#8a6b22", border: "rgba(138, 107, 34, 0.22)" },
     chat: { surface: "#edf5ff", text: "#2768a8", border: "rgba(39, 104, 168, 0.24)" },
     mood: { surface: "#f3edff", text: "#6741a5", border: "rgba(103, 65, 165, 0.24)" },
-    danger: { surface: "#fff3f5", text: "#a64861", border: "rgba(166, 72, 97, 0.26)" }
+    danger: { surface: "#fff3f5", text: "#a64861", border: "rgba(166, 72, 97, 0.26)" },
+    vision: { surface: "#eefbff", text: "#19718c", border: "rgba(25, 113, 140, 0.28)" }
   }
 };
 
@@ -2441,8 +2448,11 @@ export async function saveLocalPetUiSettings(
     };
   }
 
-  const customTheme = draft.theme === "custom" && draft.customTheme
-    ? normalizeCustomTheme(draft.customTheme, draft.customTheme.name)
+  const customThemeSource = draft.removeCustomTheme
+    ? undefined
+    : draft.customTheme ?? pet.uiSettings?.customTheme;
+  const customTheme = customThemeSource
+    ? normalizeCustomTheme(customThemeSource, customThemeSource.name)
     : undefined;
 
   if (draft.theme === "custom" && !customTheme) {
@@ -2458,7 +2468,7 @@ export async function saveLocalPetUiSettings(
       : pet.uiSettings?.clickThroughOpacity;
   const clickThroughOpacity =
     typeof clickThroughOpacitySource === "number" && Number.isFinite(clickThroughOpacitySource)
-      ? Math.min(0.8, Math.max(0.2, Math.round(clickThroughOpacitySource * 100) / 100))
+      ? Math.min(1, Math.max(0.2, Math.round(clickThroughOpacitySource * 100) / 100))
       : 0.45;
   const cursorFollowEnabled =
     typeof draft.cursorFollowEnabled === "boolean"
@@ -2471,23 +2481,14 @@ export async function saveLocalPetUiSettings(
 
   const nextPet: PetDefinition = {
     ...pet,
-    uiSettings:
-      draft.theme === "custom" && customTheme
-        ? {
-            theme: "custom",
-            customTheme,
-            clickThroughOpacity,
-            cursorFollowEnabled,
-            desktopScale,
-            desktopPosition
-          }
-        : {
-            theme: draft.theme,
-            clickThroughOpacity,
-            cursorFollowEnabled,
-            desktopScale,
-            desktopPosition
-          },
+    uiSettings: {
+      theme: draft.theme,
+      ...(customTheme ? { customTheme } : {}),
+      clickThroughOpacity,
+      cursorFollowEnabled,
+      desktopScale,
+      desktopPosition
+    },
     isLocal: true
   };
 
@@ -2498,6 +2499,43 @@ export async function saveLocalPetUiSettings(
     message: "交互面板已保存。",
     pet: nextPet
   };
+  });
+}
+
+export async function saveLocalPetScreenAwareness(
+  draft: LocalPetScreenAwarenessDraft
+): Promise<LocalPetSaveResult> {
+  const rawPetId = draft.petId;
+  if (!rawPetId.trim()) {
+    return { ok: false, message: "缺少桌宠 ID。" };
+  }
+
+  const petId = assertValidPetId(rawPetId);
+  const mode = draft.mode ?? "quiet";
+  if (mode !== "quiet" && mode !== "companion") {
+    return { ok: false, message: "屏幕观察模式无效。" };
+  }
+
+  return withPetWriteLock(petId, async () => {
+    const pet = await readPetConfigUnlocked(getPetConfigPath(petId), { forMutation: true });
+    if (!pet) return { ok: false, message: "请先保存基础信息，再开启视觉功能。" };
+
+    const nextPet: PetDefinition = {
+      ...pet,
+      screenAwarenessSettings: {
+        enabled: draft.enabled,
+        mode,
+        persistentCaptureEnabled:
+          draft.persistentCaptureEnabled ?? pet.screenAwarenessSettings?.persistentCaptureEnabled ?? false
+      },
+      isLocal: true
+    };
+    await writePetConfigUnlocked(petId, nextPet);
+    return {
+      ok: true,
+      message: draft.enabled ? "视觉功能已开启。" : "视觉功能已关闭。",
+      pet: nextPet
+    };
   });
 }
 

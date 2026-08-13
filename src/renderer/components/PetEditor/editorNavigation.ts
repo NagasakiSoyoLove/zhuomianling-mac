@@ -13,11 +13,12 @@ import {
   Volume2
   ,Gauge,
   AudioLines
+  ,ScanEye
 } from "lucide-react";
 import type { BuiltInPetUiTheme, PetExpressionKey, PetLineEvent } from "../../../shared/types/pet";
 
 export type EditorTab = "basic" | "live2d" | "ai" | "dialogue" | "interaction";
-export type AiSubTab = "aiConfig" | "persona" | "expressions" | "events";
+export type AiSubTab = "aiConfig" | "vision" | "persona" | "expressions" | "events";
 export type DialogueSubTab = "voiceInput" | "voiceReply" | "presetVoice";
 export type InteractionSubTab = "themeStyle" | "quickActions";
 export type ActiveEditorPanel = EditorTab | AiSubTab | DialogueSubTab | InteractionSubTab | "mood";
@@ -44,6 +45,7 @@ export const editorTabs: Array<{
 
 export const aiSubTabs: Array<{ id: AiSubTab; label: string; icon: typeof Settings2 }> = [
   { id: "aiConfig", label: "LLM配置", icon: Bot },
+  { id: "vision", label: "视觉功能", icon: ScanEye },
   { id: "persona", label: "角色人设", icon: BookOpen },
   { id: "events", label: "事件配置", icon: ListChecks },
   { id: "expressions", label: "表现映射", icon: Smile }

@@ -17,6 +17,11 @@ import type {
   PetLineEvent,
   PetPresetLine
 } from "../../shared/types/pet";
+import {
+  AI_CHAT_LIMITS,
+  type AiChatMessage
+} from "../../shared/types/ai";
+import { getScreenVisionFailureMessage } from "../../shared/screenVisionError";
 import type { PetWindowState } from "../../shared/types/window";
 import { normalizePetDesktopScale } from "../../shared/validation/petUiSettings";
 import { Subtitle } from "../components/Subtitle/Subtitle";
@@ -39,10 +44,19 @@ import {
 import { useAiStream } from "./useAiStream";
 import { useVoiceRecorder } from "./useVoiceRecorder";
 import { useVoiceReplyQueue } from "./useVoiceReplyQueue";
+import { useScreenMonitorReplyQueue } from "./useScreenMonitorReplyQueue";
 import { useWindowDrag } from "./useWindowDrag";
 import { MoodMeter } from "./MoodMeter";
 import { useMoodRangeEntry } from "./useMoodRangeEntry";
 import type { PetMoodDisplayState } from "../../shared/types/mood";
+import { ScreenMonitorPopover } from "./ScreenMonitorPopover";
+import { ScreenMonitorStatusChip } from "./ScreenMonitorStatusChip";
+import { canTriggerLongIdleEvent } from "./idleEventPolicy";
+import {
+  createScreenVisionRequestId,
+  looksLikeDirectScreenQuestion,
+  useScreenAwareness
+} from "./useScreenAwareness";
 
 const chatInputMaxVisibleHeightPx = 65;
 
@@ -72,7 +86,25 @@ function getClickThroughOpacity(value: unknown): number {
     return defaultClickThroughOpacity;
   }
 
-  return Math.min(0.8, Math.max(0.2, Math.round(value * 100) / 100));
+  return Math.min(1, Math.max(0.2, Math.round(value * 100) / 100));
+}
+
+function isPointInsideElement(
+  point: { x: number; y: number },
+  element: Element | null
+): boolean {
+  if (!element) {
+    return false;
+  }
+
+  const bounds = element.getBoundingClientRect();
+
+  return (
+    point.x >= bounds.left &&
+    point.x <= bounds.right &&
+    point.y >= bounds.top &&
+    point.y <= bounds.bottom
+  );
 }
 
 function getCustomThemeStyle(theme: PetCustomTheme | undefined): CSSProperties | undefined {
@@ -82,7 +114,7 @@ function getCustomThemeStyle(theme: PetCustomTheme | undefined): CSSProperties |
 
   const { tokens } = theme;
   const radialMenu = theme.radialMenu;
-  const menuAction = (kind: "passThrough" | "touch" | "chat" | "mood" | "danger") => radialMenu?.actions[kind];
+  const menuAction = (kind: "passThrough" | "touch" | "chat" | "mood" | "danger" | "vision") => radialMenu?.actions[kind];
 
   return {
     "--custom-theme-background": tokens.background,
@@ -124,6 +156,9 @@ function getCustomThemeStyle(theme: PetCustomTheme | undefined): CSSProperties |
     "--custom-menu-mood-surface": menuAction("mood")?.surface ?? tokens.petSurface ?? tokens.surface,
     "--custom-menu-mood-text": menuAction("mood")?.text ?? tokens.text,
     "--custom-menu-mood-border": menuAction("mood")?.border ?? tokens.border,
+    "--custom-menu-vision-surface": menuAction("vision")?.surface ?? tokens.petSurface ?? tokens.surface,
+    "--custom-menu-vision-text": menuAction("vision")?.text ?? tokens.accentStrong ?? tokens.accent,
+    "--custom-menu-vision-border": menuAction("vision")?.border ?? tokens.border,
     "--custom-mood-up": theme.moodMeter?.upColor ?? tokens.accentStrong ?? tokens.accent,
     "--custom-mood-down": theme.moodMeter?.downColor ?? tokens.decorationSecondary ?? tokens.mutedText,
     "--custom-mood-calm": theme.moodMeter?.calmColor ?? tokens.mutedText,
@@ -143,12 +178,14 @@ export function PetWindow(): JSX.Element {
   const cursorFollowEnabled = petDefinition?.uiSettings?.cursorFollowEnabled !== false;
   const desktopScale = normalizePetDesktopScale(petDefinition?.uiSettings?.desktopScale);
   const customTheme = petDefinition?.uiSettings?.customTheme;
-  const customThemeStyle = getCustomThemeStyle(customTheme);
+  const activeCustomTheme = uiTheme === "custom" ? customTheme : undefined;
+  const customThemeStyle = getCustomThemeStyle(activeCustomTheme);
   const subtitle = useSubtitle();
   const clickThroughButtonRef = useRef<HTMLButtonElement>(null);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const chatDraftInputRef = useRef<HTMLTextAreaElement>(null);
   const clickThroughButtonInteractiveRef = useRef(false);
+  const clickThroughControlVisibleRef = useRef(false);
   const clickThroughRef = useRef(fallbackState.clickThrough);
   const lastModelTouchHitAtRef = useRef(0);
   const rapidModelClickCountRef = useRef(0);
@@ -220,21 +257,28 @@ export function PetWindow(): JSX.Element {
       }
 
       if (!clickThroughRef.current) {
+        if (clickThroughControlVisibleRef.current) {
+          clickThroughControlVisibleRef.current = false;
+          setClickThroughControlVisible(false);
+        }
+
         return;
       }
 
       const clickThroughButton = clickThroughButtonRef.current;
+      const petArea = document.querySelector<HTMLElement>(".live2dHost");
+      const windowPoint = { x: point.windowX, y: point.windowY };
+      const isInsidePetArea =
+        isPointInsideElement(windowPoint, petArea) ||
+        isPointInsideElement(windowPoint, clickThroughButton);
 
-      if (!clickThroughButton) {
-        return;
+      if (isInsidePetArea !== clickThroughControlVisibleRef.current) {
+        clickThroughControlVisibleRef.current = isInsidePetArea;
+        setClickThroughControlVisible(isInsidePetArea);
       }
 
-      const bounds = clickThroughButton.getBoundingClientRect();
       const isInsideClickThroughButton =
-        point.windowX >= bounds.left &&
-        point.windowX <= bounds.right &&
-        point.windowY >= bounds.top &&
-        point.windowY <= bounds.bottom;
+        isInsidePetArea && isPointInsideElement(windowPoint, clickThroughButton);
 
       if (isInsideClickThroughButton === clickThroughButtonInteractiveRef.current) {
         return;
@@ -257,6 +301,7 @@ export function PetWindow(): JSX.Element {
     });
   }, []);
   const idleTimerRef = useRef<number | undefined>();
+  const screenAwarenessActiveRef = useRef(false);
   const clickThroughSpeechTimerRef = useRef<number | undefined>();
   const draftRef = useRef("");
   const chatOpenRef = useRef(false);
@@ -267,11 +312,14 @@ export function PetWindow(): JSX.Element {
     () => undefined
   );
   const reportVoiceErrorRef = useRef<(text: string) => void>(() => undefined);
+  const stopAllScreenAwarenessRef = useRef<() => Promise<void>>(async () => undefined);
+  const cancelScreenMonitorRepliesRef = useRef<() => void>(() => undefined);
   const [state, setState] = useState<PetWindowState>(fallbackState);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [touchEnabled, setTouchEnabled] = useState(true);
   const [radialMenuOpen, setRadialMenuOpen] = useState(false);
+  const [clickThroughControlVisible, setClickThroughControlVisible] = useState(false);
   const [moodMeterOpen, setMoodMeterOpen] = useState(false);
   const [moodDisplay, setMoodDisplay] = useState<PetMoodDisplayState>();
   const [radialMenuPosition, setRadialMenuPosition] = useState({ x: 190, y: 190 });
@@ -281,6 +329,10 @@ export function PetWindow(): JSX.Element {
   const [rightFaceAnchor, setRightFaceAnchor] = useState<Live2DClientPoint>();
   const [draft, setDraft] = useState("");
   const petDefinitionRef = useRef(petDefinition);
+  const clearIdleTimer = (): void => {
+    window.clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = undefined;
+  };
   const speechSettings = useMemo(
     () =>
       buildSpeechSettings(
@@ -311,7 +363,8 @@ export function PetWindow(): JSX.Element {
       mode: "typewriter",
       holdMs: status === "error" ? 3200 : undefined,
       tone: petDefinitionRef.current?.subtitleStyle?.tone,
-      maxWidth: petDefinitionRef.current?.subtitleStyle?.maxWidth
+      maxWidth: petDefinitionRef.current?.subtitleStyle?.maxWidth,
+      kind: status === "error" ? "system" : "event"
     });
   };
 
@@ -346,6 +399,9 @@ export function PetWindow(): JSX.Element {
 
   const setChatOpenState = (open: boolean): void => {
     chatOpenRef.current = open;
+    if (open) {
+      clearIdleTimer();
+    }
     setChatOpen(open);
   };
 
@@ -512,6 +568,7 @@ export function PetWindow(): JSX.Element {
 
       if (nextState.clickThrough || !nextState.visible) {
         voiceRecorder.cancel();
+        cancelScreenMonitorRepliesRef.current();
         cancelAiStreamRef.current({ updateUi: nextState.visible });
         voiceReply.stop();
       }
@@ -532,8 +589,10 @@ export function PetWindow(): JSX.Element {
     return window.desktopPet?.petWindow.onCloseEffect(() => {
       subtitle.hide();
       voiceRecorder.cancel();
+      cancelScreenMonitorRepliesRef.current();
       cancelAiStreamRef.current();
       voiceReply.stop();
+      void stopAllScreenAwarenessRef.current();
       setClosingEffect(true);
       setChatOpenState(false);
       setRadialMenuOpen(false);
@@ -638,8 +697,17 @@ export function PetWindow(): JSX.Element {
   };
 
   const resetIdleTimer = (): void => {
-    window.clearTimeout(idleTimerRef.current);
+    clearIdleTimer();
+
+    if (!canTriggerLongIdleEvent(chatOpenRef.current, screenAwarenessActiveRef.current)) {
+      return;
+    }
+
     idleTimerRef.current = window.setTimeout(() => {
+      idleTimerRef.current = undefined;
+      if (!canTriggerLongIdleEvent(chatOpenRef.current, screenAwarenessActiveRef.current)) {
+        return;
+      }
       triggerEventExpression("idle", "low", "offline");
       speakLine("idle", "我还在这里，别担心。");
     }, 22000);
@@ -662,7 +730,88 @@ export function PetWindow(): JSX.Element {
     scheduleVoiceRestart: (isVoiceTriggered) =>
       scheduleVoiceRestartRef.current(isVoiceTriggered)
   });
-  const { messages, reportVoiceError, sending, sendMessageText, typewriterActive } = aiStream;
+  const {
+    beginExternalQuestion,
+    attachMessageScreenshot,
+    failExternalQuestion,
+    messages,
+    presentExternalChunk,
+    reportVoiceError,
+    sending,
+    sendMessageText,
+    typewriterActive
+  } = aiStream;
+  const screenReplyQueue = useScreenMonitorReplyQueue({
+    petId: pet.petId,
+    voiceReply,
+    presentReply: (reply, options) => aiStream.presentExternalReply(reply, options),
+    clearPresentation: aiStream.clearExternalPresentation,
+    isPlaybackOccupied: () =>
+      sending ||
+      voiceReply.hasActiveAudio() ||
+      subtitle.isConversationBubbleActive()
+  });
+  useLayoutEffect(() => {
+    cancelScreenMonitorRepliesRef.current = screenReplyQueue.cancel;
+  }, [screenReplyQueue.cancel]);
+  const screenAwareness = useScreenAwareness({
+    petId: pet.petId,
+    enabled: petDefinition?.screenAwarenessSettings?.enabled === true,
+    persistentCaptureEnabled: petDefinition?.screenAwarenessSettings?.persistentCaptureEnabled === true,
+    mode: petDefinition?.screenAwarenessSettings?.mode,
+    onReplyChunk: (result, meta) => {
+      presentExternalChunk(result.reply ?? "", {
+        showInChat: meta.purpose === "direct-screen-question",
+        voiceText: result.voiceText,
+        protocolTier: result.protocolTier,
+        ...(meta.purpose === "direct-screen-question" && meta.sessionId
+          ? { voiceSessionId: meta.sessionId }
+          : {}),
+        ...(result.presentationKind ? { presentationKind: result.presentationKind } : {})
+      });
+    },
+    onReply: async (result, meta) => {
+      if (meta.purpose === "direct-screen-question") {
+        await aiStream.presentExternalReply(result.reply, {
+          voiceText: result.voiceText,
+          emotion: result.emotion,
+          ...(meta.sessionId ? { voiceSessionId: meta.sessionId } : {}),
+          ...(result.presentationKind ? { presentationKind: result.presentationKind } : {})
+        });
+        return;
+      }
+      if (!meta.sessionId || !meta.replyId) return;
+      screenReplyQueue.enqueue({
+        sessionId: meta.sessionId,
+        replyId: meta.replyId,
+        reply: result.reply,
+        voiceText: result.voiceText,
+        emotion: result.emotion,
+        ...(result.presentationKind ? { presentationKind: result.presentationKind } : {})
+      });
+    },
+    onError: (message) => showVoiceMessage(message, "error")
+  });
+  const { cancelDirectQuestion } = screenAwareness;
+  useLayoutEffect(() => {
+    const active = screenAwareness.phase !== "inactive" && screenAwareness.phase !== "error";
+    const wasActive = screenAwarenessActiveRef.current;
+    screenAwarenessActiveRef.current = active;
+
+    if (active) {
+      clearIdleTimer();
+    } else if (wasActive && !chatOpenRef.current) {
+      resetIdleTimer();
+    }
+  }, [screenAwareness.phase]);
+  useEffect(() => {
+    if (screenAwareness.phase === "inactive" || screenAwareness.phase === "error") {
+      screenReplyQueue.cancel();
+    }
+  }, [screenAwareness.phase]);
+  useLayoutEffect(() => {
+    stopAllScreenAwarenessRef.current = screenAwareness.stopAll;
+  }, [screenAwareness.stopAll]);
   useLayoutEffect(() => {
     reportVoiceErrorRef.current = reportVoiceError;
   }, [reportVoiceError]);
@@ -692,6 +841,7 @@ export function PetWindow(): JSX.Element {
   useLayoutEffect(() => {
     cancelAiStreamRef.current = aiStream.cancel;
     sendRecognizedVoiceTextRef.current = (text) => {
+      cancelScreenMonitorRepliesRef.current();
       void aiStream.sendMessageText(text, true);
     };
     scheduleVoiceRestartRef.current = voiceRecorder.scheduleRestart;
@@ -701,7 +851,16 @@ export function PetWindow(): JSX.Element {
   }, [aiStream, voiceRecorder.scheduleRestart]);
 
   useMoodRangeEntry({
-    busy: sending || typewriterActive || voiceReply.hasActiveAudio() || closingEffect,
+    // Conversation/fallback subtitles are protected by subtitleStore. Keep a
+    // mood-entry notification pending until that protected presentation has
+    // naturally finished, otherwise subtitle.show() rejects it and the hook
+    // would drop the one-shot range-entered event.
+    busy:
+      sending ||
+      typewriterActive ||
+      voiceReply.hasActiveAudio() ||
+      subtitle.isConversationBubbleActive() ||
+      closingEffect,
     trigger: (source) => triggerExpressionSource(source, "low"),
     speak: (line) => {
       const normalizedLine = normalizePresetLine(line);
@@ -722,10 +881,16 @@ export function PetWindow(): JSX.Element {
   });
 
   useEffect(() => {
-    resetIdleTimer();
+    if (chatOpen || screenAwarenessActiveRef.current) {
+      clearIdleTimer();
+    } else {
+      resetIdleTimer();
+    }
+  }, [chatOpen]);
 
+  useEffect(() => {
     return () => {
-      window.clearTimeout(idleTimerRef.current);
+      clearIdleTimer();
       window.clearTimeout(moodClickTimerRef.current);
       window.clearTimeout(clickThroughSpeechTimerRef.current);
     };
@@ -736,12 +901,14 @@ export function PetWindow(): JSX.Element {
 
     if (state.clickThrough) {
       voiceRecorder.cancel();
+      screenReplyQueue.cancel();
       aiStream.cancel();
       voiceReply.stop();
+      void cancelDirectQuestion();
       setChatOpenState(false);
       setRadialMenuOpen(true);
     }
-  }, [state.clickThrough]);
+  }, [cancelDirectQuestion, state.clickThrough]);
 
   const scrollChatToLatest = (behavior: ScrollBehavior = "smooth"): void => {
     const chatMessages = chatMessagesRef.current;
@@ -791,15 +958,16 @@ export function PetWindow(): JSX.Element {
   }, [radialMenuOpen]);
 
   useEffect(() => {
-    if (!state.clickThrough) {
-      clickThroughButtonInteractiveRef.current = false;
-      void window.desktopPet?.petWindow.setClickThroughControlInteractive(false);
-    }
+    clickThroughControlVisibleRef.current = false;
+    setClickThroughControlVisible(false);
+    clickThroughButtonInteractiveRef.current = false;
+    void window.desktopPet?.petWindow.setClickThroughControlInteractive(false);
   }, [state.clickThrough]);
 
   const toggleClickThrough = async (): Promise<void> => {
     if (!clickThroughRef.current) {
       voiceRecorder.cancel();
+      screenReplyQueue.cancel();
       aiStream.cancel();
       voiceReply.stop();
     }
@@ -810,7 +978,10 @@ export function PetWindow(): JSX.Element {
       clickThroughRef.current = nextState.clickThrough;
 
       if (nextState.clickThrough) {
+        clickThroughControlVisibleRef.current = false;
+        setClickThroughControlVisible(false);
         voiceRecorder.cancel();
+        screenReplyQueue.cancel();
         aiStream.cancel();
         voiceReply.stop();
         setChatOpenState(false);
@@ -866,6 +1037,7 @@ export function PetWindow(): JSX.Element {
 
   const closeChat = (): void => {
     voiceRecorder.cancel();
+    screenReplyQueue.cancel();
     aiStream.cancel();
     voiceReply.stop();
     setChatOpenState(false);
@@ -890,8 +1062,10 @@ export function PetWindow(): JSX.Element {
 
   const closeWindow = async (): Promise<void> => {
     voiceRecorder.cancel();
+    screenReplyQueue.cancel();
     aiStream.cancel();
     voiceReply.stop();
+    await screenAwareness.stopAll();
     setChatOpenState(false);
     const playCloseEffect = hasConfiguredEvent("closing");
 
@@ -957,7 +1131,38 @@ export function PetWindow(): JSX.Element {
     }, 1400);
   };
 
-  const sendMessage = (): Promise<void> => sendMessageText(draft);
+  const sendMessage = async (): Promise<void> => {
+    const text = draft.trim();
+    cancelScreenMonitorRepliesRef.current();
+    if (looksLikeDirectScreenQuestion(text) && screenAwareness.canUseVision) {
+      const screenRequestId = createScreenVisionRequestId();
+      const context: AiChatMessage[] = aiStream.messages
+        .filter((message) => message.status !== "thinking" && message.status !== "error")
+        .slice(-AI_CHAT_LIMITS.maxContextMessages)
+        .map((message) => ({
+          role: message.role === "user" ? "user" : "assistant",
+          content: message.aiStructuredContent?.trim() || message.text,
+          ...(message.screenshot ? { image: message.screenshot } : {})
+        }));
+      setDraft("");
+      const userMessageId = beginExternalQuestion(text, screenRequestId);
+      if (userMessageId === false) return;
+      const completed = await screenAwareness.requestDirectQuestion(
+        text,
+        context,
+        screenRequestId,
+        (screenshot) => attachMessageScreenshot(userMessageId, screenshot)
+      );
+      if (!completed.ok) {
+        failExternalQuestion(
+          completed.message
+            ?? getScreenVisionFailureMessage(completed.errorCode ?? "unknown")
+        );
+      }
+      return;
+    }
+    await sendMessageText(draft);
+  };
   const toggleVoiceInput = (): Promise<void> => voiceRecorder.toggle();
 
   return (
@@ -1043,7 +1248,7 @@ export function PetWindow(): JSX.Element {
         >
           <ChatThemeDecorations
             theme={uiTheme}
-            customTheme={customTheme}
+            customTheme={activeCustomTheme}
             slots={["header-left", "header-right", "frame-top-right"]}
           />
           {!chatCollapsed ? (
@@ -1086,12 +1291,12 @@ export function PetWindow(): JSX.Element {
               <div className="petChatMessages" ref={chatMessagesRef}>
                 <ChatThemeDecorations
                   theme={uiTheme}
-                  customTheme={customTheme}
+                  customTheme={activeCustomTheme}
                   slots={["body-watermark"]}
                 />
                 {messages.map((message) => (
                   <p
-                    className={["petChatMessage", message.role, message.status]
+                    className={["petChatMessage", message.role, message.status, message.presentationKind]
                       .filter(Boolean)
                       .join(" ")}
                     key={message.id}
@@ -1220,6 +1425,7 @@ export function PetWindow(): JSX.Element {
           variant={uiTheme}
           touchEnabled={touchEnabled}
           chatOpen={chatOpen}
+          clickThroughControlVisible={clickThroughControlVisible}
           clickThroughButtonRef={clickThroughButtonRef}
           onCloseMenu={closeRadialMenu}
           onToggleClickThrough={() => void toggleClickThrough()}
@@ -1228,10 +1434,51 @@ export function PetWindow(): JSX.Element {
           onToggleChat={toggleChat}
           moodOpen={moodMeterOpen}
           onToggleMood={() => setMoodMeterOpen((open) => !open)}
+          visionAvailable={screenAwareness.canUseVision}
+          visionActive={screenAwareness.phase !== "inactive" && screenAwareness.phase !== "error"}
+          onToggleVision={() => {
+            screenReplyQueue.cancel();
+            screenAwareness.toggleFromMenu();
+          }}
         />
       ) : null}
+      {!state.clickThrough && !closingEffect ? (
+        <>
+          <ScreenMonitorStatusChip
+            theme={uiTheme}
+            phase={screenAwareness.phase}
+            manualObservationActive={screenAwareness.manualObservationActive}
+            panelOpen={screenAwareness.panelOpen}
+            debugSnapshot={screenAwareness.debugSnapshot}
+          onStop={() => {
+            screenReplyQueue.cancel();
+            void screenAwareness.stop();
+          }}
+          />
+          {screenAwareness.panelOpen ? (
+            <ScreenMonitorPopover
+              theme={uiTheme}
+              position={radialMenuPosition}
+              sources={screenAwareness.sources}
+              sourcesLoading={screenAwareness.sourcesLoading}
+              selectedSource={screenAwareness.selectedSource}
+              mode={screenAwareness.mode}
+              phase={screenAwareness.phase}
+              error={screenAwareness.error}
+              onSelectSource={screenAwareness.selectSource}
+              onSetMode={screenAwareness.setMode}
+              onRefreshSources={() => void screenAwareness.refreshSources()}
+              onStart={() => void screenAwareness.startWatching()}
+              onClose={() => {
+                screenReplyQueue.cancel();
+                screenAwareness.closePanel();
+              }}
+            />
+          ) : null}
+        </>
+      ) : null}
       {moodMeterOpen && moodDisplay && !state.clickThrough && !closingEffect ? (
-        <MoodMeter state={moodDisplay} theme={uiTheme} customization={customTheme?.moodMeter} fallbackPosition={{ left: radialMenuPosition.x + 136 <= window.innerWidth ? radialMenuPosition.x + 104 : radialMenuPosition.x - 136, top: Math.max(8, radialMenuPosition.y - 50) }} />
+        <MoodMeter state={moodDisplay} theme={uiTheme} customization={activeCustomTheme?.moodMeter} fallbackPosition={{ left: radialMenuPosition.x + 136 <= window.innerWidth ? radialMenuPosition.x + 104 : radialMenuPosition.x - 136, top: Math.max(8, radialMenuPosition.y - 50) }} />
       ) : null}
     </main>
   );

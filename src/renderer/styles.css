@@ -6,6 +6,7 @@
 @import "./styles/00-tokens.css";
 @import "./styles/10-base.css";
 @import "./styles/components/20-shell-selector.css";
+@import "./styles/components/22-timed-diagnostics-test.css";
 @import "./styles/components/30-editor-shell.css";
 @import "./styles/components/31-editor-basic.css";
 @import "./styles/components/32-editor-themes-import.css";

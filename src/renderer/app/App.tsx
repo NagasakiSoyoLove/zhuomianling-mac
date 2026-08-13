@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, FolderOpen, MousePointer2, PackageOpen, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Activity, AlertTriangle, CircleHelp, FolderOpen, MousePointer2, PackageOpen, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { LocalPetConfigCorruption, PetDefinition } from "../../shared/types/pet";
 import type { PetWindowState } from "../../shared/types/window";
 import type { MemoryBookRouteState } from "../components/MemoryBook/memoryBookState";
@@ -9,6 +9,7 @@ import { StartupSplash } from "../components/StartupSplash/StartupSplash";
 import { hasUsableLive2DModel, loadAvailablePets } from "../pets/petSources";
 import { DeferredViewBoundary } from "./DeferredViewBoundary";
 import { PetPackageImportDialog } from "../components/PetPackage/PetPackageImportDialog";
+import { TIMED_DIAGNOSTICS_TEST_ENABLED } from "../components/TimedDiagnosticsTest/timedDiagnosticsTest";
 
 const PetEditor = lazy(async () => {
   const module = await import("../components/PetEditor/PetEditor");
@@ -22,8 +23,17 @@ const PetStage = lazy(async () => {
   const module = await import("../components/PetStage/PetStage");
   return { default: module.PetStage };
 });
+const TimedDiagnosticsTestPage = lazy(async () => {
+  const module = await import("../components/TimedDiagnosticsTest/TimedDiagnosticsTestPage");
+  return { default: module.TimedDiagnosticsTestPage };
+});
+const HelpCenter = lazy(async () => {
+  await import("../styles/surfaces/85-help-center.css");
+  const module = await import("../components/HelpCenter/HelpCenter");
+  return { default: module.HelpCenter };
+});
 
-type AppView = "selector" | "editor" | "memoryBook";
+type AppView = "selector" | "editor" | "memoryBook" | "timedDiagnosticsTest";
 
 const MIN_STARTUP_SPLASH_MS = 2000;
 const STARTUP_SPLASH_EXIT_MS = 360;
@@ -58,6 +68,22 @@ function DeferredViewFallback({ label }: { label: string }): JSX.Element {
         <p>正在加载，请稍候…</p>
       </div>
     </section>
+  );
+}
+
+function HelpCenterLoadingFallback(): JSX.Element {
+  return (
+    <div className="unsavedOverlay" role="status" aria-live="polite">
+      <div className="unsavedDialog">
+        <span className="unsavedIcon" aria-hidden="true">
+          <CircleHelp size={22} />
+        </span>
+        <div className="unsavedText">
+          <h2>正在打开帮助中心</h2>
+          <p>正在载入帮助界面，请稍候…</p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -262,6 +288,8 @@ export function App(): JSX.Element {
   const [restoringConfig, setRestoringConfig] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const importButtonRef = useRef<HTMLButtonElement>(null);
+  const [helpCenterOpen, setHelpCenterOpen] = useState(false);
+  const helpButtonRef = useRef<HTMLButtonElement>(null);
   const [petWindowState, setPetWindowState] = useState<PetWindowState>({
     visible: false,
     clickThrough: false
@@ -557,6 +585,11 @@ export function App(): JSX.Element {
     setEditorOptions({ mode: "edit", petId: pet.id });
   };
 
+  const closeHelpCenter = useCallback((): void => {
+    setHelpCenterOpen(false);
+    window.requestAnimationFrame(() => helpButtonRef.current?.focus());
+  }, []);
+
   const handlePackageImported = (pet: PetDefinition): void => {
     setAvailablePets((current) => [pet, ...current.filter((item) => item.id !== pet.id)]);
     setSelectedPetId(pet.id);
@@ -721,6 +754,23 @@ export function App(): JSX.Element {
     }
   };
 
+  if (currentView === "timedDiagnosticsTest") {
+    return (
+      <main className="appShell timedDiagnosticsTestShell">
+        <DeferredViewBoundary
+          resetKey="timed-diagnostics-test"
+          title="开发者监测页面加载失败"
+          onBack={() => setCurrentView("selector")}
+        >
+          <Suspense fallback={<DeferredViewFallback label="正在打开开发者监测" />}>
+            <TimedDiagnosticsTestPage onBack={() => setCurrentView("selector")} />
+          </Suspense>
+        </DeferredViewBoundary>
+        {isStartupSplashVisible ? <StartupSplash leaving={isStartupSplashLeaving} /> : null}
+      </main>
+    );
+  }
+
   if (currentView === "editor") {
     return (
       <main className="appShell editorViewShell">
@@ -787,6 +837,27 @@ export function App(): JSX.Element {
           <span>主页</span>
         </div>
         <div className="topbarActionGroup">
+          {TIMED_DIAGNOSTICS_TEST_ENABLED ? (
+            <button
+              className="topbarImportButton timedDiagnosticsTopbarButton"
+              type="button"
+              onClick={() => setCurrentView("timedDiagnosticsTest")}
+            >
+              <Activity size={17} />
+              监测
+            </button>
+          ) : null}
+          <button
+            ref={helpButtonRef}
+            className="topbarImportButton helpTopbarButton"
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={helpCenterOpen}
+            onClick={() => setHelpCenterOpen(true)}
+          >
+            <CircleHelp size={17} />
+            帮助中心
+          </button>
           <button ref={importButtonRef} className="topbarImportButton" type="button" onClick={() => setImportDialogOpen(true)}>
             <PackageOpen size={17} />
             导入桌宠
@@ -879,6 +950,11 @@ export function App(): JSX.Element {
         setImportDialogOpen(false);
         window.requestAnimationFrame(() => importButtonRef.current?.focus());
       }} /> : null}
+      {helpCenterOpen ? (
+        <Suspense fallback={<HelpCenterLoadingFallback />}>
+          <HelpCenter onClose={closeHelpCenter} />
+        </Suspense>
+      ) : null}
       {isStartupSplashVisible ? <StartupSplash leaving={isStartupSplashLeaving} /> : null}
     </main>
   );

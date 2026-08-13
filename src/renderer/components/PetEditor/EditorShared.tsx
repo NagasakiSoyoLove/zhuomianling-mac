@@ -275,7 +275,9 @@ export function PanelSaveActions({
   disabled = false,
   disabledReason,
   result,
-  saved = false
+  saved = false,
+  actionLabel,
+  actionIcon
 }: {
   onSave?: () => void;
   saving?: boolean;
@@ -283,6 +285,8 @@ export function PanelSaveActions({
   disabledReason?: string;
   result?: SaveFeedbackResult;
   saved?: boolean;
+  actionLabel?: string;
+  actionIcon?: JSX.Element;
 }): JSX.Element {
   return (
     <div className="panelSaveActions">
@@ -295,8 +299,8 @@ export function PanelSaveActions({
         </div>
       ) : null}
       <button className="primaryAction" type="button" disabled={saving || disabled} onClick={onSave}>
-        {saved && !saving ? <CheckCircle2 size={17} /> : <Save size={17} />}
-        {saving ? "保存中" : saved ? "已保存" : "保存"}
+        {actionIcon ?? (saved && !saving ? <CheckCircle2 size={17} /> : <Save size={17} />)}
+        {saving ? "保存中" : actionLabel ?? (saved ? "已保存" : "保存")}
       </button>
     </div>
   );

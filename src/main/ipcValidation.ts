@@ -16,6 +16,10 @@ import { normalizePetLineValue } from "../shared/validation/petDefinition";
 import { isPetMoodRangeId, isSystemMoodEvent } from "../shared/mood";
 import { AI_PROMPT_LIMITS } from "../shared/aiContract";
 import {
+  AI_CHAT_LIMITS,
+  isAiChatImageMimeType
+} from "../shared/types/ai";
+import {
   assertMemoryClearRequest,
   assertMemoryCreateRequest,
   assertMemoryExportRequest,
@@ -28,6 +32,16 @@ import {
   assertMemorySourceConversationRequest,
   assertMemoryUpdateRequest
 } from "../shared/validation/memory";
+import {
+  SCREEN_LIMITS,
+  assertScreenAwarenessSettingsRequest,
+  assertScreenFrameRequest,
+  assertScreenMonitorReplyStatusRequest,
+  assertScreenSourceSelectionRequest,
+  assertScreenStopRequest,
+  assertScreenVisionConnectionDraft,
+  assertScreenVisionTimingRequest
+} from "../shared/validation/screen";
 
 interface PayloadLimits {
   maxDepth?: number;
@@ -36,12 +50,14 @@ interface PayloadLimits {
   maxStringLength?: number;
   maxTotalStringLength?: number;
   maxBinaryBytes?: number;
+  maxTotalBinaryBytes?: number;
   maxNodes?: number;
 }
 
 interface ValidationBudget {
   nodes: number;
   totalStringLength: number;
+  totalBinaryBytes: number;
 }
 
 const defaultLimits: Required<PayloadLimits> = {
@@ -51,6 +67,7 @@ const defaultLimits: Required<PayloadLimits> = {
   maxStringLength: 1_000_000,
   maxTotalStringLength: 4_000_000,
   maxBinaryBytes: 262_144,
+  maxTotalBinaryBytes: 4_194_304,
   maxNodes: 20_000
 };
 
@@ -59,6 +76,8 @@ const speechSessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{15,127}$/;
 
 export const validatedIpcChannels = new Set([
   "app:get-version",
+  "app:open-local-help",
+  "timed-diagnostics-test:get-snapshot",
   "app-window:is-shown",
   "app-window:startup-surface-ready",
   "app-window:startup-timing",
@@ -106,6 +125,20 @@ export const validatedIpcChannels = new Set([
   "ai-settings:list-models",
   "ai-settings:test-output",
   "ai-settings:save",
+  "screen-vision:get-availability",
+  "screen-vision:test-current",
+  "screen-vision:list-models",
+  "screen-vision:test-independent",
+  "screen-vision:save-independent",
+  "screen-vision:save-settings",
+  "screen-vision:pet-availability",
+  "screen-vision:list-sources",
+  "screen-vision:start",
+  "screen-vision:frame",
+  "screen-vision:stop",
+  "screen-vision:reply-status",
+  "screen-vision:get-state",
+  "screen-vision:timing",
   "pet-package:inspect-export",
   "pet-package:export",
   "pet-package:begin-import",
@@ -280,7 +313,8 @@ function assertSafePayload(
   const limits = { ...defaultLimits, ...limitsOverrides };
   const budget: ValidationBudget = {
     nodes: 0,
-    totalStringLength: 0
+    totalStringLength: 0,
+    totalBinaryBytes: 0
   };
   // Electron's structured clone payloads may legitimately share an object
   // instance (for example, one expression source selected by multiple
@@ -325,12 +359,20 @@ function assertSafePayload(
       if (item.byteLength > limits.maxBinaryBytes) {
         fail(channel, `二进制数据不能超过 ${limits.maxBinaryBytes} 字节。`);
       }
+      budget.totalBinaryBytes += item.byteLength;
+      if (budget.totalBinaryBytes > limits.maxTotalBinaryBytes) {
+        fail(channel, `二进制数据总量不能超过 ${limits.maxTotalBinaryBytes} 字节。`);
+      }
       return;
     }
 
     if (ArrayBuffer.isView(item)) {
       if (item.byteLength > limits.maxBinaryBytes) {
         fail(channel, `二进制数据不能超过 ${limits.maxBinaryBytes} 字节。`);
+      }
+      budget.totalBinaryBytes += item.byteLength;
+      if (budget.totalBinaryBytes > limits.maxTotalBinaryBytes) {
+        fail(channel, `二进制数据总量不能超过 ${limits.maxTotalBinaryBytes} 字节。`);
       }
       return;
     }
@@ -595,6 +637,7 @@ function validateAiChat(channel: string, value: unknown, requireRequestId: boole
   }
   for (const messageValue of request.messages) {
     const message = assertRecord(channel, messageValue, "消息");
+    assertAllowedKeys(channel, message, ["role", "content", "image"]);
     if (message.role !== "system" && message.role !== "user" && message.role !== "assistant") {
       fail(channel, "消息 role 无效。");
     }
@@ -605,11 +648,27 @@ function validateAiChat(channel: string, value: unknown, requireRequestId: boole
       AI_PROMPT_LIMITS.conversationMessageCharacters,
       { allowEmpty: true }
     );
+    if (message.image !== undefined) {
+      const image = assertRecord(channel, message.image, "消息 image");
+      assertAllowedKeys(channel, image, ["data", "mimeType"]);
+      if (!isAiChatImageMimeType(image.mimeType)) {
+        fail(channel, "消息 image MIME 无效。");
+      }
+      const data = image.data;
+      if (!(data instanceof ArrayBuffer) && !ArrayBuffer.isView(data)) {
+        fail(channel, "消息 image data 无效。");
+      }
+      if (data.byteLength < 32 || data.byteLength > AI_CHAT_LIMITS.maxImageBytes) {
+        fail(channel, "消息 image 大小无效。");
+      }
+    }
   }
   assertSafePayload(channel, request, {
     maxArrayLength: 128,
     maxStringLength: AI_PROMPT_LIMITS.conversationMessageCharacters,
-    maxTotalStringLength: AI_PROMPT_LIMITS.conversationTotalCharacters
+    maxTotalStringLength: AI_PROMPT_LIMITS.conversationTotalCharacters,
+    maxBinaryBytes: AI_CHAT_LIMITS.maxImageBytes,
+    maxTotalBinaryBytes: AI_CHAT_LIMITS.maxTotalImageBytes
   });
 }
 
@@ -620,6 +679,7 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
 
   const noArgumentChannels = new Set([
     "app:get-version",
+    "app:open-local-help",
     "app-window:is-shown",
     "pet-config:list-local",
     "pet-config:import-ui-theme",
@@ -635,11 +695,138 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
     "pet-window:get-state",
     "pet-window:get-payload",
     "pet-window:consume-pending-source-preview"
-    ,"mood:get-display-state"
+    ,"mood:get-display-state",
+    "screen-vision:pet-availability",
+    "screen-vision:list-sources",
+    "screen-vision:get-state"
   ]);
 
   if (noArgumentChannels.has(channel)) {
     expectArgumentCount(channel, args, 0);
+    return;
+  }
+
+  if (channel === "screen-vision:get-availability" || channel === "screen-vision:test-current") {
+    expectArgumentCount(channel, args, 1);
+    assertPetId(channel, args[0]);
+    return;
+  }
+
+  if (
+    channel === "screen-vision:list-models" ||
+    channel === "screen-vision:test-independent" ||
+    channel === "screen-vision:save-independent"
+  ) {
+    expectArgumentCount(channel, args, 1);
+    try {
+      assertScreenVisionConnectionDraft(args[0]);
+      assertSafePayload(channel, args[0], {
+        maxArrayLength: SCREEN_LIMITS.maxModels,
+        maxStringLength: 16_384,
+        maxTotalStringLength: 262_144,
+        maxObjectKeys: 32
+      });
+    } catch (error) {
+      fail(channel, error instanceof Error ? error.message : "视觉连接参数无效。");
+    }
+    return;
+  }
+
+  if (channel === "screen-vision:save-settings") {
+    expectArgumentCount(channel, args, 1);
+    try {
+      assertScreenAwarenessSettingsRequest(args[0]);
+      assertSafePayload(channel, args[0], {
+        maxStringLength: 128,
+        maxTotalStringLength: 512,
+        maxObjectKeys: 8
+      });
+    } catch (error) {
+      fail(channel, error instanceof Error ? error.message : "视觉设置参数无效。");
+    }
+    return;
+  }
+
+  if (channel === "screen-vision:start") {
+    expectArgumentCount(channel, args, 1);
+    try {
+      assertScreenSourceSelectionRequest(args[0]);
+      assertSafePayload(channel, args[0], {
+        maxArrayLength: SCREEN_LIMITS.maxContextMessages,
+        maxStringLength: SCREEN_LIMITS.maxContextMessageCharacters,
+        maxTotalStringLength: SCREEN_LIMITS.maxQuestionCharacters + 24_000,
+        maxBinaryBytes: AI_CHAT_LIMITS.maxImageBytes,
+        maxTotalBinaryBytes: AI_CHAT_LIMITS.maxTotalImageBytes,
+        maxObjectKeys: 64
+      });
+    } catch (error) {
+      fail(channel, error instanceof Error ? error.message : "屏幕来源参数无效。");
+    }
+    return;
+  }
+
+  if (channel === "screen-vision:frame") {
+    expectArgumentCount(channel, args, 1);
+    try {
+      assertScreenFrameRequest(args[0]);
+      assertSafePayload(channel, args[0], {
+        maxBinaryBytes: SCREEN_LIMITS.maxFrameBytes,
+        maxTotalBinaryBytes: SCREEN_LIMITS.maxObjectBudgetBytes,
+        maxStringLength: SCREEN_LIMITS.maxQuestionCharacters,
+        maxTotalStringLength:
+          SCREEN_LIMITS.maxQuestionCharacters +
+          SCREEN_LIMITS.maxContextMessages * SCREEN_LIMITS.maxContextMessageCharacters +
+          1_024,
+        maxObjectKeys: 32
+      });
+    } catch (error) {
+      fail(channel, error instanceof Error ? error.message : "屏幕帧参数无效。");
+    }
+    return;
+  }
+
+  if (channel === "screen-vision:stop") {
+    expectArgumentCount(channel, args, 1);
+    try {
+      assertScreenStopRequest(args[0]);
+      assertSafePayload(channel, args[0], {
+        maxStringLength: SCREEN_LIMITS.maxSessionIdCharacters,
+        maxTotalStringLength: 512,
+        maxObjectKeys: 8
+      });
+    } catch (error) {
+      fail(channel, error instanceof Error ? error.message : "停止视觉请求无效。");
+    }
+    return;
+  }
+
+  if (channel === "screen-vision:reply-status") {
+    expectArgumentCount(channel, args, 1);
+    try {
+      assertScreenMonitorReplyStatusRequest(args[0]);
+      assertSafePayload(channel, args[0], {
+        maxStringLength: SCREEN_LIMITS.maxSessionIdCharacters,
+        maxTotalStringLength: 512,
+        maxObjectKeys: 8
+      });
+    } catch (error) {
+      fail(channel, error instanceof Error ? error.message : "视觉回复状态无效。");
+    }
+    return;
+  }
+
+  if (channel === "screen-vision:timing") {
+    expectArgumentCount(channel, args, 1);
+    try {
+      assertScreenVisionTimingRequest(args[0]);
+      assertSafePayload(channel, args[0], {
+        maxStringLength: 128,
+        maxTotalStringLength: 512,
+        maxObjectKeys: 8
+      });
+    } catch (error) {
+      fail(channel, error instanceof Error ? error.message : "视觉计时参数无效。");
+    }
     return;
   }
 
@@ -706,6 +893,7 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
       "petId",
       "theme",
       "customTheme",
+      "removeCustomTheme",
       "clickThroughOpacity",
       "cursorFollowEnabled",
       "desktopScale"
@@ -715,10 +903,20 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
     )) {
       fail(channel, "theme 无效。");
     }
+    if (draft.removeCustomTheme !== undefined && typeof draft.removeCustomTheme !== "boolean") {
+      fail(channel, "removeCustomTheme 必须是布尔值。");
+    }
+    if (draft.removeCustomTheme === true && draft.theme === "custom") {
+      fail(channel, "启用自定义主题时不能删除 customTheme。");
+    }
+    if (draft.removeCustomTheme === true && draft.customTheme !== undefined) {
+      fail(channel, "删除 customTheme 时不能同时提交主题定义。");
+    }
     if (draft.theme === "custom") {
       validateCustomTheme(channel, draft.customTheme);
     } else if (draft.customTheme !== undefined) {
-      fail(channel, "系统主题不能携带 customTheme。");
+      // 已导入主题与当前激活的内置主题可以同时存在；只有显式删除才清除它。
+      validateCustomTheme(channel, draft.customTheme);
     }
     if (draft.desktopScale !== undefined && !isPetDesktopScale(draft.desktopScale)) {
       fail(
@@ -956,6 +1154,12 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
     if (typeof args[0] !== "string" || !startupRendererStages.includes(args[0] as never)) {
       fail(channel, "startup stage 无效。");
     }
+    return;
+  }
+
+  // TIMED DIAGNOSTICS TEST MODULE: the main-window snapshot has no payload.
+  if (channel === "timed-diagnostics-test:get-snapshot") {
+    expectArgumentCount(channel, args, 0);
     return;
   }
 

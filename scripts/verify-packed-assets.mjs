@@ -11,6 +11,26 @@ import {
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, "..");
 const asarPath = path.join(projectRoot, "release", "win-unpacked", "resources", "app.asar");
+const unpackedHelpPagePath = path.join(
+  projectRoot,
+  "release",
+  "win-unpacked",
+  "resources",
+  "app.asar.unpacked",
+  "dist",
+  "renderer",
+  "help.html"
+);
+const unpackedHelpAssetsPath = path.join(
+  projectRoot,
+  "release",
+  "win-unpacked",
+  "resources",
+  "app.asar.unpacked",
+  "dist",
+  "renderer",
+  "assets"
+);
 
 let asarStat;
 
@@ -42,6 +62,23 @@ if (forbiddenEntries.length || productionModuleEntries.length) {
 console.log(
   `Packed asset audit passed (${entries.length} entries, ${asarStat.size} bytes, only approved production modules).`
 );
+
+try {
+  const helpPageStat = await stat(unpackedHelpPagePath);
+  const helpAssetsStat = await stat(unpackedHelpAssetsPath);
+  if (!helpPageStat.isFile() || !helpAssetsStat.isDirectory()) {
+    throw new Error("the tutorial entry or asset directory has an unexpected type");
+  }
+} catch (error) {
+  console.error(
+    `Packed asset audit failed: the system-browser tutorial entry is not unpacked: ${
+      error instanceof Error ? error.message : String(error)
+    }`
+  );
+  process.exit(1);
+}
+
+console.log("Packed asset audit passed: system-browser tutorial entry is unpacked.");
 
 const memoryRuntimeRoot = path.join(
   projectRoot,

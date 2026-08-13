@@ -9,6 +9,9 @@ out/
 release/
 .vite/
 
+# Local generated visual assets
+/output/
+
 # Logs
 *.log
 npm-debug.log*

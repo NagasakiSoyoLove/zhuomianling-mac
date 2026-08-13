@@ -9,10 +9,18 @@ const electronMock = vi.hoisted(() => ({
   userDataPath: ""
 }));
 
+const moodVoiceMock = vi.hoisted(() => ({
+  resolveMoodVoiceOverride: vi.fn()
+}));
+
 vi.mock("electron", () => ({
   app: {
     getPath: () => electronMock.userDataPath
   }
+}));
+
+vi.mock("../mood/moodVoice", () => ({
+  resolveMoodVoiceOverride: moodVoiceMock.resolveMoodVoiceOverride
 }));
 
 class FakeWebContents extends EventEmitter {
@@ -76,6 +84,8 @@ beforeEach(async () => {
       );
     })
   );
+  moodVoiceMock.resolveMoodVoiceOverride.mockReset();
+  moodVoiceMock.resolveMoodVoiceOverride.mockResolvedValue(undefined);
   vi.resetModules();
 });
 
@@ -85,6 +95,45 @@ afterEach(async () => {
 });
 
 describe("text-to-speech request lifecycle", () => {
+  it("uses the mood-selected reference audio for an external screen reply session", async () => {
+    const darkenedReferenceAudioPath = path.join(temporaryDirectory, "darkened-reference.wav");
+    await fs.writeFile(darkenedReferenceAudioPath, "fixture-darkened-audio", "utf8");
+    moodVoiceMock.resolveMoodVoiceOverride.mockResolvedValue({
+      refAudioPath: darkenedReferenceAudioPath,
+      promptText: "黑化参考文本",
+      resolvedMoodRange: "darkened"
+    });
+
+    const fetchMock = vi.fn(async () =>
+      new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { "Content-Type": "audio/wav" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { registerMoodTextToSpeechSnapshot, speakText } = await import("./textToSpeech");
+    const owner = new FakeWebContents();
+    const target = asWebContents(owner);
+
+    registerMoodTextToSpeechSnapshot(target, "pet-a", "screen-reply-1", "darkened");
+    await speakText(target, {
+      petId: "pet-a",
+      requestId: "screen-segment-1",
+      sessionId: "screen-reply-1",
+      text: "这是一条自动检测回复。"
+    });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      ref_audio_path: string;
+      prompt_text: string;
+    };
+    expect(requestBody).toMatchObject({
+      ref_audio_path: darkenedReferenceAudioPath,
+      prompt_text: "黑化参考文本"
+    });
+    expect(moodVoiceMock.resolveMoodVoiceOverride).toHaveBeenCalledWith("pet-a", "darkened");
+  });
+
   it("locks one voice configuration snapshot for every segment in a reply session", async () => {
     const secondReferenceAudioPath = path.join(temporaryDirectory, "reference-2.wav");
     await fs.writeFile(secondReferenceAudioPath, "fixture-audio-2", "utf8");

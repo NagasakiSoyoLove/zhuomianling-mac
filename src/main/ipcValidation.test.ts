@@ -20,6 +20,7 @@ describe("validateIpcArguments", () => {
     }])).toThrow(/apiKey/);
     expect(() => validateIpcArguments("pet-package:commit-import", [{ sessionId: "x".repeat(65) }])).toThrow(/sessionId/);
   });
+  // TIMED DIAGNOSTICS TEST MODULE: screenshot and timing IPC validation coverage.
   it("accepts a bounded AI stream request", () => {
     expect(() =>
       validateIpcArguments("ai-chat:stream", [
@@ -30,6 +31,78 @@ describe("validateIpcArguments", () => {
         }
       ])
     ).not.toThrow();
+    expect(() => validateIpcArguments("ai-chat:stream", [{
+      petId: "pet-a",
+      requestId: "request-0001",
+      messages: [{
+        role: "user",
+        content: "看看这张图",
+        image: { data: new Uint8Array(64), mimeType: "image/jpeg" }
+      }]
+    }])).not.toThrow();
+    expect(() => validateIpcArguments("ai-chat:stream", [{
+      petId: "pet-a",
+      requestId: "request-0001",
+      messages: [{
+        role: "user",
+        content: "看看这张图",
+        image: { data: new Uint8Array(64), mimeType: "text/plain" }
+      }]
+    }])).toThrow(/MIME/);
+  });
+
+  it("validates bounded screen vision frames and rejects oversized binary payloads", () => {
+    const frame = {
+      petId: "pet-a",
+      sessionId: "screen-session-0001",
+      frameId: "frame-1",
+      purpose: "manual-monitor",
+      frame: {
+        data: new Uint8Array(64),
+        mimeType: "image/jpeg",
+        width: 1280,
+        height: 720,
+        capturedAt: Date.now()
+      }
+    };
+    expect(() => validateIpcArguments("screen-vision:frame", [frame])).not.toThrow();
+    expect(() => validateIpcArguments("screen-vision:frame", [{
+      ...frame,
+      frame: { ...frame.frame, mimeType: "text/plain" }
+    }])).toThrow(/MIME/);
+    expect(() => validateIpcArguments("screen-vision:frame", [{
+      ...frame,
+      frame: { ...frame.frame, data: new Uint8Array(512 * 1024 + 1) }
+    }])).toThrow(/截图大小|二进制/);
+  });
+
+  it("accepts bounded visual timing events and rejects unknown stages", () => {
+    expect(() => validateIpcArguments("screen-vision:timing", [{
+      petId: "pet-a",
+      requestId: "screen-request-0001",
+      kind: "chat",
+      phase: "renderer",
+      stage: "frame-encoded",
+      ok: true
+    }])).not.toThrow();
+    expect(() => validateIpcArguments("screen-vision:timing", [{
+      petId: "pet-a",
+      requestId: "screen-request-0001",
+      phase: "renderer",
+      stage: "unknown-stage"
+    }])).toThrow(/stage/);
+  });
+
+  it("validates monitor reply delivery status IPC", () => {
+    const request = {
+      petId: "pet-a",
+      sessionId: "screen-session-0001",
+      replyId: "screen-reply-00000001",
+      status: "accepted"
+    };
+    expect(() => validateIpcArguments("screen-vision:reply-status", [request])).not.toThrow();
+    expect(() => validateIpcArguments("screen-vision:reply-status", [{ ...request, status: "played" }])).not.toThrow();
+    expect(() => validateIpcArguments("screen-vision:reply-status", [{ ...request, status: "unknown" }])).toThrow(/状态/);
   });
 
   it("rejects traversal and unbounded pet IDs", () => {
@@ -168,7 +241,7 @@ describe("validateIpcArguments", () => {
     }])).toThrow(/desktopScale/);
   });
 
-  it("accepts only a bounded pet-local custom theme on custom theme saves", () => {
+  it("accepts only a bounded pet-local custom theme and explicit deletion", () => {
     const customTheme = {
       id: "mint-plaid",
       name: "薄荷格纹",
@@ -246,7 +319,23 @@ describe("validateIpcArguments", () => {
       petId: "pet-a",
       theme: "soft",
       customTheme
-    }])).toThrow(/系统主题/);
+    }])).not.toThrow();
+    expect(() => validateIpcArguments("pet-config:save-ui-settings", [{
+      petId: "pet-a",
+      theme: "soft",
+      removeCustomTheme: true
+    }])).not.toThrow();
+    expect(() => validateIpcArguments("pet-config:save-ui-settings", [{
+      petId: "pet-a",
+      theme: "soft",
+      customTheme,
+      removeCustomTheme: true
+    }])).toThrow(/同时提交|同时/);
+    expect(() => validateIpcArguments("pet-config:save-ui-settings", [{
+      petId: "pet-a",
+      theme: "soft",
+      removeCustomTheme: "yes"
+    }])).toThrow(/removeCustomTheme/);
     expect(() => validateIpcArguments("pet-config:save-ui-settings", [{
       petId: "pet-a",
       theme: "custom",
@@ -553,6 +642,12 @@ describe("validateIpcArguments", () => {
     expect(() =>
       validateIpcArguments("app-window:startup-timing", ["splash-hidden", "extra"])
     ).toThrow(/参数数量/);
+  });
+
+  // TIMED DIAGNOSTICS TEST MODULE: main-window snapshot access coverage.
+  it("accepts the TIMED DIAGNOSTICS TEST MODULE snapshot without payload", () => {
+    expect(() => validateIpcArguments("timed-diagnostics-test:get-snapshot", [])).not.toThrow();
+    expect(() => validateIpcArguments("timed-diagnostics-test:get-snapshot", ["extra"])).toThrow(/参数数量/);
   });
 
   it("keeps every IPC registration covered by a validation schema", async () => {

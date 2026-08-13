@@ -65,7 +65,7 @@ function isSameTheme(
 ): boolean {
   return (
     theme === savedTheme &&
-    (theme !== "custom" || JSON.stringify(customTheme) === JSON.stringify(savedCustomTheme))
+    JSON.stringify(customTheme) === JSON.stringify(savedCustomTheme)
   );
 }
 
@@ -278,7 +278,8 @@ export function ThemePanel({
       const saveResult = await window.desktopPet?.petConfig.saveUiSettings({
         petId: pet.id,
         theme: selectedTheme,
-        customTheme: selectedTheme === "custom" ? selectedCustomTheme : undefined
+        customTheme: selectedCustomTheme,
+        removeCustomTheme: !selectedCustomTheme && Boolean(savedCustomTheme)
       });
 
       if (!saveResult) {
@@ -307,7 +308,7 @@ export function ThemePanel({
       <div className="panelTitleRow">
         <div>
           <h2>主题风格</h2>
-          <p>为右键快捷菜单、聊天框和字幕气泡选择整体外观。</p>
+          <p>为右键快捷菜单、聊天框和字幕气泡选择整体外观；导入主题会一直保留，直到手动删除。</p>
         </div>
         <button className="secondaryAction" type="button" onClick={() => setImportDialogOpen(true)}>
           <Upload size={17} />

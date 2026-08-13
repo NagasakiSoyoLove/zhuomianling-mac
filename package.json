@@ -1,6 +1,6 @@
 {
   "name": "zhuomianling",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "private": true,
   "license": "MIT",
   "description": "Open-source customizable Live2D desktop pet framework with chat, subtitles, and optional voice features.",
@@ -58,6 +58,10 @@
       "README.md",
       "LICENSE",
       "NOTICE"
+    ],
+    "asarUnpack": [
+      "dist/renderer/help.html",
+      "dist/renderer/assets/**"
     ],
     "extraResources": [
       {

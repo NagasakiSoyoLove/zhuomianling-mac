@@ -86,7 +86,9 @@ export function PetStage({
   const uiThemeLabel = uiTheme === "custom"
     ? pet.uiSettings?.customTheme?.name ?? "自定义主题"
     : uiThemeLabels[uiTheme];
-  const customThemeStyle = getCustomThemeStyle(pet.uiSettings?.customTheme);
+  const customThemeStyle = getCustomThemeStyle(
+    uiTheme === "custom" ? pet.uiSettings?.customTheme : undefined
+  );
   const hasModel = hasUsableLive2DModel(pet);
   const detailRole = pet.details?.role?.trim() || "尚未填写角色定位";
   const detailPersonality = pet.details?.personality?.trim() || "尚未填写性格说明";
