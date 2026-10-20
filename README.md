@@ -1,4 +1,4 @@
-# 桌面灵  mac版 完全适合mac系统
+# 桌面灵
 
 简体中文
 
@@ -6,13 +6,13 @@
 ![React](https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react&logoColor=111)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat&logo=typescript&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite-6-646CFF?style=flat&logo=vite&logoColor=white)
-![Platform](https://img.shields.io/badge/Platform-Windows-blue?style=flat)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-blue?style=flat)
 
 一款**开源、可自定义、本地优先的 Live2D 桌宠软件框架**。用户可以导入自己的 Live2D 模型，配置桌宠资料、人设、事件台词、AI 聊天，以及可选的视觉和语音能力。
 
 > 桌面灵不内置受版权限制的角色模型、声音模型、参考音频、AI Key 或云服务密钥。开源版提供的是桌宠框架和配置工具，真实角色资源由用户自行导入并保存在本机。
 
-**当前主要平台**：Windows mac
+**支持平台**：Windows 10 / 11、macOS 12+
 
 ---
 
@@ -83,7 +83,7 @@ Live2D 导入完成后，进入“表现映射”给需要使用的动作或表�
 
 **语音输入**在“语音系统 / 语音输入”中配置腾讯云实时语音识别。填写 AppID、SecretId 和 SecretKey 后连接，再调整自动结束、静音时长、音量阈值和是否连续录音。使用时必须点击聊天框的麦克风按钮，软件不会后台监听或无提示录音。
 
-**语音回复**在“语音系统 / 声音模型”中配置本机 GPT-SoVITS，选择匹配的模型版本、GPT/SoVITS 模型和推理设备，并提供本机可读取的 3–10 秒参考音频与参考文本。连接成功后再选择输出语言和播放方式；语音失败不会影响文字聊天和字幕。
+**语音回复**在“语音系统 / 声音模型”中配置本机 GPT-SoVITS，支持 V1、V2、V3、V4、V5 Dev、V5 Turbo、V2 Pro 和 V2 Pro Plus。选择匹配版本的 GPT/SoVITS 模型和推理设备，并提供本机可读取的 3–10 秒参考音频与参考文本。连接成功后再选择输出语言和播放方式；语音失败不会影响文字聊天和字幕。
 
 **记忆书**按桌宠单独保存。第一次进入时可以确认启用召回和自动整理，默认不保留原始来源；选择暂不启用只关闭本次引导，下次进入仍可重新选择。记忆书支持章节阅读、搜索、时间筛选、编辑、忘记、撤销和导出。只有明确启用自动整理后，当前用户消息和最终可见回复才会发送给配置的整理 AI。
 
@@ -106,12 +106,12 @@ Live2D 导入完成后，进入“表现映射”给需要使用的动作或表�
 
 ## 安装与运行
 
-### 从源码运行
+### Windows 从源码运行
 
 前置要求：
 
-- Node.js 18+
-- npm 9+
+- Node.js 22.12+
+- npm 10+
 - Windows 10 / 11
 
 安装依赖：
@@ -134,6 +134,33 @@ npm.cmd run build
 ```
 
 `npm.cmd run build` 会在构建末尾执行发布资源审计。开发机上的 `public/live2d/` 模型不会复制到 `dist/`；如果构建产物中出现 Live2D 模型、声音模型、参考音频或本地私密配置，构建会直接失败。
+
+### macOS 从源码运行
+
+前置要求：
+
+- macOS 12 或更高版本
+- Node.js 22.12+
+- npm 10
+
+在项目目录打开终端并运行：
+
+```sh
+npm install
+npm run dev
+```
+
+### 构建 macOS 安装包
+
+```sh
+npm run dist:mac
+```
+
+脚本会构建 Apple Silicon（arm64）和 Intel（x64）的 DMG 与 ZIP 包，输出到 `release/`。应用目前未签名或公证；Mac 可能会阻止直接打开从网络下载的构建包。
+
+屏幕识别需要授权桌面灵：macOS Ventura 及更新版本前往“系统设置 > 隐私与安全性 > 屏幕与系统录音”；macOS Monterey 前往“系统偏好设置 > 安全性与隐私 > 隐私 > 屏幕录制”。授权后重新打开应用。语音输入会在用户点击麦克风时请求麦克风权限。
+
+macOS 安装包尚未携带 Windows 版本地记忆运行时，因此 Mac 上不会提供本地记忆检索与自动整理。普通聊天、Live2D 桌宠、模型导入、屏幕识别及其它已配置的在线 AI 功能不依赖此运行时。
 
 ### 构建 Windows 安装包
 
@@ -164,7 +191,8 @@ npm.cmd run start:prod
 桌面灵是本地优先的桌面软件。用户创建的桌宠、头像、Live2D 模型、AI 设置、人设、事件台词和语音配置默认保存在：
 
 ```text
-%APPDATA%/zhuomianling/
+Windows: `%APPDATA%/zhuomianling/`
+macOS: `~/Library/Application Support/zhuomianling/`
 ```
 
 每只桌宠的数据通常位于 `pets/<pet-id>/`。API Key 和腾讯云凭据由 Electron `safeStorage` 加密保存，普通配置只保留必要的状态或非敏感元数据。只有用户明确开启记忆自动整理时，当前用户消息和最终可见回复才会发送给用户配置的整理 AI；中文记忆检索在本机完成。
@@ -181,7 +209,7 @@ npm.cmd run start:prod
 - GPT-SoVITS 声音模型、参考音频、`.pth`、`.ckpt` 或生成音频
 - 云端 AI 服务或托管后端
 
-正式 Windows 包可以携带通用的本地中文记忆运行时和 BGE INT8 模型，但不包含任何用户记忆、预置角色记忆或用户导入资源。
+正式 Windows 包可以携带通用的本地中文记忆运行时和 BGE INT8 模型；macOS 包目前不包含该 Windows 运行时。所有平台均不包含用户记忆、预置角色记忆或用户导入资源。
 
 ---
 
